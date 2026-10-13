@@ -1,0 +1,48 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+build/
+build_*
+*.spec
+.Python*
+.env
+.venv
+venv/
+ENV/
+env.bak/
+
+# Executable
+sizeof(*)
+dist/GPU*
+*.exe
+*.exe.manifest
+*.ico
+
+# Distribution
+*.egg
+*.egg-info/
+dist/
+build/
+*.egg
+*.egg-info/
+dist/
+
+# IDE
+.vscode/
+*.swp
+*~*
+
+# System files
+Thumbs.db
+*.lnk
+
+# Mac
+.DS_Store
+
+# Logs
+*.log
+
+# Generated documentation
+templates/docs
