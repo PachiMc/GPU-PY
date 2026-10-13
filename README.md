@@ -1,65 +1,110 @@
-# GPU PY
+# GPU PY 🚀
 
-Monitor, overclock, ventiladores y LED/RGB para GPUs NVIDIA (RTX 3070 PNY XLR8 y similares),
-como alternativa en Python a PNY VelocityX. Interfaz moderna con CustomTkinter.
+> Monitor, overclock, ventiladores y LED/RGB para GPUs NVIDIA — alternativa en Python a PNY VelocityX, con interfaz moderna.
 
-## 📦 Download
+![Windows](https://img.shields.io/badge/Windows-10%2F11-blue?logo=windows)
+![Python](https://img.shields.io/badge/Python-3.10%2B-green?logo=python)
+![Licencia](https://img.shields.io/badge/licencia-MIT-lightgrey)
+![Release](https://img.shields.io/github/v/release/PachiMc/GPU-PY?label=release)
 
-**GPU PY.exe** - Ejecutable listo para usar (un solo archivo, con icono, solicita Administración al abrir).
-[Download GPU PY.exe](https://github.com/username/GPU-PY/releases/latest) *(reemplazar con enlace real)*
+Pensado para la **RTX 3070 PNY XLR8** (y otras GeForce). Monitorea temperatura, relojes, ventilador, potencia, uso, VRAM y throttling con historial, y permite aplicar overclock, curvas de ventilación y efectos LED de forma segura.
 
-## 🚀 Installation (Windows)
+![GPU PY](assets/gpupy.png)
 
-1. Instala **Python 3.10 o superior** desde python.org (marca *Add python.exe to PATH*).
-2. En esta carpeta: `pip install -r requirements.txt`
-3. Prueba sin riesgo con una GPU simulada: `python gpupy.py --demo`
-4. Uso real: doble clic en **run_as_admin.bat** (los cambios requieren Administrador).
+## ⬇️ Descarga (recomendado)
 
-Para compilar tu propio ejecutable, ejecuta **build_exe.bat**; esto generará `dist\GPU PY.exe`.
+No necesitas instalar Python. Descarga el ejecutable listo para usar:
 
-## 🔧 Functions
+👉 **[Descargar GPU-PY.exe (última release)](https://github.com/PachiMc/GPU-PY/releases/latest/download/GPU-PY.exe)**
 
-| Function | Detail |
+1. Descarga `GPU-PY.exe`.
+2. Doble clic (Windows pedirá **Administrador** automáticamente, necesario para aplicar cambios).
+3. Listo: la app se abre y puedes monitorear tu GPU.
+
+> ¿Prefieres compilarlo tú? Mira [🛠️ Compilar el .exe](#️-compilar-el-exe).
+
+## ✨ Funciones
+
+| Función | Detalle |
 |---|---|
-| Monitor | temperature, clocks, fan, power, usage, VRAM and throttling reason, with history |
-| Overclock | core and memory offsets, power limit, clock ceiling; via NVML or, if unavailable, via **NVAPI** like VelocityX |
-| Fans | automatic, fixed or custom curve with preview (at ≥ 88 °C forces 100%) |
-| LED / RGB | fixed color, breathing, off and, depending on your controller, strobe and stroboscopic; via NVAPI or I2C like VelocityX |
-| Profiles | save and apply everything with one click; can be applied from the command line |
+| 📊 Monitor | Temperatura, relojes, ventilador, potencia, uso, VRAM y motivo de throttling, con historial |
+| ⚡ Overclock | Offsets de núcleo y memoria, límite de potencia y techo de reloj; por NVML o **NVAPI** (como VelocityX) |
+| 🌀 Ventiladores | Automático, fijo o curva personalizada con vista previa (a ≥ 88 °C fuerza 100 %) |
+| 🌈 LED / RGB | Color fijo, respiración, apagado y —según tu controlador— ciclo y estrobo; por NVAPI o I2C (como VelocityX) |
+| 💾 Perfiles | Guarda y aplica overclock + ventiladores + LED con un clic, también desde consola |
+| 🚀 Inicio con Windows | Aplica tu perfil automáticamente al iniciar sesión (tarea programada con máximos privilegios) |
 
-## ⌨️ Command Line
+## 🚀 Uso desde código fuente (Windows)
 
+1. Instala **Python 3.10 o superior** desde [python.org](https://www.python.org/downloads/) (marca *Add python.exe to PATH*).
+2. En esta carpeta:
+   ```bat
+   pip install -r requirements.txt
+   ```
+3. Prueba sin riesgo con una GPU simulada:
+   ```bat
+   python gpupy.py --demo
+   ```
+4. Uso real (los cambios requieren Administrador): doble clic en **`run_as_admin.bat`**.
+
+### ▶️ Iniciar con Windows
+
+En **Ajustes** activa *Iniciar GPU PY al iniciar sesión* (con la app abierta como Administrador):
+
+- Crea una tarea del Programador de tareas con **máximos privilegios** (Windows no pide permiso cada vez).
+- Opcional: *Iniciar minimizado* + *Perfil al iniciar* (aplica overclock, ventiladores y LED automáticamente).
+- Si el driver tarda en estar listo, GPU PY reintenta aplicar el perfil hasta 3 veces.
+- Sin interfaz:
+  ```bat
+  python gpupy.py --autostart on|off|status
+  ```
+
+## ⌨️ Línea de comandos
+
+```bat
+python gpupy.py --list                  perfiles guardados
+python gpupy.py --apply Gaming          aplica un perfil y sale
+python gpupy.py --reset                 valores de fábrica
+python gpupy.py --led "#ff0066"         color fijo (también: off | default)
+python gpupy.py --led-info              controlador LED detectado
+python gpupy.py --i2c-scan              diagnóstico de solo lectura del LED (guarda led_report.txt)
+python gpupy.py --oc-info               qué overclock permite tu GPU (solo lectura)
 ```
-python gpupy.py --list                  List saved profiles
-python gpupy.py --apply Gaming          Apply a profile and exit
-python gpupy.py --reset                 Reset to factory defaults
-python gpupy.py --led "#ff0066"         Fixed LED color (also: off | default)
-python gpupy.py --led-info              Detect LED controller
-python gpupy.py --i2c-scan              Read-only LED I2C diagnosis (saves led_report.txt)
-python gpupy.py --oc-info               What overclock your GPU allows (read-only)
+
+Los perfiles y ajustes se guardan en `%APPDATA%\GPU PY` (migra solos los de versiones anteriores).
+
+## 🛠️ Compilar el .exe
+
+Para generar tu propio ejecutable (un solo archivo, con icono, pide Administrador al abrir):
+
+```bat
+build_exe.bat
 ```
 
-Profiles and settings are saved in `%APPDATA%\GPU PY` (previous version settings are auto-migrated).
+Saldrá en `dist\GPU PY.exe`. Equivale a:
 
-## ⚠️ Security and Notes
-
-- Overclock and LED changes **are not permanent**: they are lost on PC restart. This is why the startup profile exists.
-- Increase offsets gradually (core by 15 MHz, memory by 50) and test for stability.
-- LED via I2C only writes the exact registers used by VelocityX (whitelist) and never touches other chips.
-- Fan control: on many GeForce with Windows the driver may reject it; the app warns and sets fans to automatic.
-- When closing GPU PY, the fan always returns to automatic.
-- Cycle/strobe speed scale is the raw controller value (1–100).
-
-## 📁 Structure
-
-- `gpupy.py` – entry point and CLI
-- `ui.py` – main window and pages · `widgets.py` – components · `theme.py` – design system · `icons.py` – icons
-- `core.py` – profiles, settings and application logic · `autostart.py` – Windows startup
-- `gpu_backend.py` (NVML) · `oc_nvapi.py` · `led_nvapi.py` · `led_i2c.py` – hardware access
-
-## 🛠 Build
-
-```batch
+```bat
+python -m pip install -r requirements.txt pyinstaller
 python -m PyInstaller --noconfirm --onefile --windowed --uac-admin --name "GPU PY" ^
   --icon assets\gpupy.ico --add-data "assets;assets" --collect-all customtkinter gpupy.py
 ```
+
+## 📁 Estructura
+
+- `gpupy.py` — punto de entrada y línea de comandos
+- `ui.py` — ventana principal y páginas · `widgets.py` — componentes · `theme.py` — diseño · `icons.py` — iconos
+- `core.py` — perfiles, ajustes y lógica · `autostart.py` — inicio con Windows
+- `gpu_backend.py` (NVML) · `oc_nvapi.py` · `led_nvapi.py` · `led_i2c.py` — acceso al hardware
+
+## ⚠️ Seguridad y notas
+
+- Los cambios de overclock y LED **no son permanentes**: se pierden al reiniciar. Por eso existe el perfil de inicio.
+- Sube los offsets poco a poco (núcleo de 15 en 15 MHz, memoria de 50 en 50) y prueba estabilidad.
+- El LED por I2C solo escribe los registros exactos que usa VelocityX (lista blanca), nunca toca otros chips.
+- En muchas GeForce el driver puede rechazar el control de ventiladores; la app lo avisa y los deja en automático.
+- Al cerrar GPU PY, el ventilador siempre vuelve a automático.
+- La escala de velocidad de ciclo/estrobo es el valor crudo del controlador (1–100).
+
+## 📄 Licencia
+
+MIT — úsalo, modifícalo y compártelo libremente. Sin garantía; el overclock siempre es bajo tu responsabilidad.

@@ -1,48 +1,39 @@
+# Python / bytecode
 __pycache__/
-*.pyc
+*.py[cod]
 *.pyo
 *.pyd
-.Python
+
+# PyInstaller
 build/
-build_*
+dist/
 *.spec
-.Python*
-.env
-.venv
+
+# Virtualenvs
+.venv/
 venv/
 ENV/
-env.bak/
+env/
+.env
 
-# Executable
-sizeof(*)
-dist/GPU*
-*.exe
-*.exe.manifest
-*.ico
-
-# Distribution
-*.egg
-*.egg-info/
-dist/
-build/
-*.egg
-*.egg-info/
-dist/
-
-# IDE
-.vscode/
-*.swp
-*~*
-
-# System files
-Thumbs.db
-*.lnk
-
-# Mac
-.DS_Store
+# Secrets / local
+token.txt
+create_repo_and_release.py
+publish.py
+led_report.txt
 
 # Logs
 *.log
 
-# Generated documentation
-templates/docs
+# OS / IDE
+Thumbs.db
+Desktop.ini
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*~
+
+# Keep project icon
+!assets/*.ico
+!assets/*.png
