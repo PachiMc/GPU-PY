@@ -33,6 +33,7 @@ No necesitas instalar Python. Descarga el ejecutable listo para usar:
 | 🌈 LED / RGB | Color fijo, respiración, apagado y —según tu controlador— ciclo y estrobo; por NVAPI o I2C (como VelocityX) |
 | 💾 Perfiles | Guarda y aplica overclock + ventiladores + LED con un clic, también desde consola |
 | 🚀 Inicio con Windows | Aplica tu perfil automáticamente al iniciar sesión (tarea programada con máximos privilegios) |
+| 🔕 Bandeja (tray) | Minimizar y la X llevan a la bandeja (clic para mostrar, clic derecho para salir); oculto mide cada 5 s |
 
 ## 🚀 Uso desde código fuente (Windows)
 
@@ -52,7 +53,7 @@ No necesitas instalar Python. Descarga el ejecutable listo para usar:
 En **Ajustes** activa *Iniciar GPU PY al iniciar sesión* (con la app abierta como Administrador):
 
 - Crea una tarea del Programador de tareas con **máximos privilegios** (Windows no pide permiso cada vez).
-- Opcional: *Iniciar minimizado* + *Perfil al iniciar* (aplica overclock, ventiladores y LED automáticamente).
+- Opcional: *Iniciar minimizado* + *Perfil al iniciar* (aplica overclock, ventiladores y LED automáticamente). Con *Bandeja del sistema* activado, arranca directamente en el tray.
 - Si el driver tarda en estar listo, GPU PY reintenta aplicar el perfil hasta 3 veces.
 - Sin interfaz:
   ```bat
@@ -86,14 +87,14 @@ Saldrá en `dist\GPU PY.exe`. Equivale a:
 ```bat
 python -m pip install -r requirements.txt pyinstaller
 python -m PyInstaller --noconfirm --onefile --windowed --uac-admin --name "GPU PY" ^
-  --icon assets\gpupy.ico --add-data "assets;assets" --collect-all customtkinter gpupy.py
+  --icon assets\gpupy.ico --add-data "assets;assets" --collect-all customtkinter --collect-all pystray gpupy.py
 ```
 
 ## 📁 Estructura
 
 - `gpupy.py` — punto de entrada y línea de comandos
 - `ui.py` — ventana principal y páginas · `widgets.py` — componentes · `theme.py` — diseño · `icons.py` — iconos
-- `core.py` — perfiles, ajustes y lógica · `autostart.py` — inicio con Windows
+- `core.py` — perfiles, ajustes y lógica · `autostart.py` — inicio con Windows · `tray.py` — icono en la bandeja
 - `gpu_backend.py` (NVML) · `oc_nvapi.py` · `led_nvapi.py` · `led_i2c.py` — acceso al hardware
 
 ## ⚠️ Seguridad y notas

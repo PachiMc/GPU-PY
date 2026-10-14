@@ -14,6 +14,7 @@ import customtkinter as ctk
 import autostart
 import icons
 import theme
+import tray
 from core import (APP_NAME, DEFAULT_CURVE, SAFETY_TEMP, VERSION, ProfileStore, Settings, apply_led_state,
                   apply_profile_to_backend, data_dir, default_led_state, default_profile, interpolate,
                   resource_path)
@@ -77,9 +78,16 @@ class App(ctk.CTk):
         self.load_current_values()
 
         self.protocol("WM_DELETE_WINDOW", self.on_close)
+        self._in_tray = False
+        self._tray = tray.TrayController(self, self._show_from_tray, self._apply_from_tray,
+                                         self._quit_from_tray)
+        self.bind("<Unmap>", self._on_unmap)
         if startup:
             if self.settings.start_minimized:
-                self.iconify()
+                if self.settings.tray_enabled:
+                    self._hide_to_tray(silent=True)
+                else:
+                    self.iconify()
             self._startup_job = self.after(1500, self.run_startup)
         self._poll_job = self.after(300, self.poll)
 
@@ -116,7 +124,10 @@ class App(ctk.CTk):
         self.pname = tk.StringVar(value="")
 
     def notify(self, message: str, kind: str = "ok") -> None:
-        self.toast.show(message, kind)
+        if getattr(self, "_in_tray", False):
+            self._tray.notify(message)
+        else:
+            self.toast.show(message, kind)
 
     def alert(self, title: str, message: str) -> None:
         ask(self, title, message, ok="Entendido", cancel=None)
@@ -575,7 +586,11 @@ class App(ctk.CTk):
             row.switch.configure(state="disabled")
         self.minimized_var = tk.IntVar(value=int(self.settings.start_minimized))
         SwitchRow(start.content, "Iniciar minimizado",
-                  "Arranca en la barra de tareas, sin abrir la ventana.", self.minimized_var,
+                  "Arranca en la barra de tareas o la bandeja, sin abrir la ventana.", self.minimized_var,
+                  self._save_settings).pack(fill="x", pady=(0, 16))
+        self.tray_var = tk.IntVar(value=int(self.settings.tray_enabled))
+        SwitchRow(start.content, "Bandeja del sistema (tray)",
+                  "Minimizar y la X llevan a la bandeja; clic derecho para salir.", self.tray_var,
                   self._save_settings).pack(fill="x", pady=(0, 16))
 
         prof = ctk.CTkFrame(start.content, fg_color="transparent")
@@ -607,9 +622,12 @@ class App(ctk.CTk):
 
     def _save_settings(self) -> None:
         self.settings.start_minimized = bool(self.minimized_var.get())
+        self.settings.tray_enabled = bool(self.tray_var.get())
         choice = self.startup_choice.get()
         self.settings.startup_profile = None if choice == "Ninguno" else choice
         self.settings.save()
+        if not self.settings.tray_enabled and self._in_tray:
+            self._show_from_tray()                                     # no quedarse oculto sin icono
         self.notify("Ajustes guardados.", "ok")
 
     def _toggle_autostart(self) -> None:
@@ -738,35 +756,69 @@ class App(ctk.CTk):
                     "ok" if not errs else "warn")
 
     # ------------------------------------------------------------------------
+    #  Bandeja del sistema (tray)
+    # ------------------------------------------------------------------------
+    def _on_unmap(self, _event=None) -> None:
+        if self.settings.tray_enabled and not self._in_tray and self.state() == "iconic":
+            self._hide_to_tray()
+
+    def _hide_to_tray(self, silent: bool = False) -> None:
+        if not self.settings.tray_enabled or not self._tray.start():
+            self.iconify()                                             # sin tray: minimizar clásico
+            return
+        self._in_tray = True
+        self.withdraw()
+        if not silent:
+            self._tray.notify("GPU PY sigue en la bandeja: clic para mostrar, clic derecho para salir.")
+
+    def _show_from_tray(self) -> None:
+        self._tray.stop()
+        self._in_tray = False
+        self.deiconify()
+        self.lift()
+        self.focus_force()
+
+    def _apply_from_tray(self) -> None:
+        self.run_startup(manual=True)
+
+    def _quit_from_tray(self) -> None:
+        self._tray.stop()
+        self._in_tray = False
+        self._exit_app()
+
+    # ------------------------------------------------------------------------
     #  Telemetría
     # ------------------------------------------------------------------------
     def poll(self) -> None:
+        hidden = self._in_tray
         try:
             t = self.be.read()
         except Exception as e:
             self.notify(f"Error leyendo la GPU: {e}", "error")
-            self._poll_job = self.after(2000, self.poll)
+            self._poll_job = self.after(5000 if hidden else 2000, self.poll)
             return
-        self.g_temp.set(t.temp)
-        self.g_core.set(t.core_clock)
-        self.g_mem.set(t.mem_clock)
-        self.g_fan.set(t.fan_pct)
-
-        limit = self.power.get() or self.L.power_default_w
         self.hist["temp"].append(t.temp)
         self.hist["util"].append(t.util_gpu)
         self.hist["power"].append(100 * t.power_w / max(1, self.L.power_default_w))
-        if self.current_page == "monitor":
-            self.chart.redraw()
-        self.stat["power"].set(f"{t.power_w:.0f} W  /  {limit} W")
-        self.stat["util"].set(f"{t.util_gpu} %")
-        self.stat["vram"].set(f"{t.vram_used_mb} / {t.vram_total_mb} MB")
-        self.bar_power.set(min(1, t.power_w / max(1, limit)))
-        self.bar_util.set(t.util_gpu / 100)
-        self.bar_vram.set(t.vram_used_mb / max(1, t.vram_total_mb))
-        self._set_state_pill(t.throttle or "Sin limitaciones", C.warn if t.throttle else C.ok)
 
-        if self.fan_mode.get() == "curve" and self.fan_supported:
+        if not hidden:                                                 # ventana visible: todo el refresco
+            self.g_temp.set(t.temp)
+            self.g_core.set(t.core_clock)
+            self.g_mem.set(t.mem_clock)
+            self.g_fan.set(t.fan_pct)
+
+            limit = self.power.get() or self.L.power_default_w
+            if self.current_page == "monitor":
+                self.chart.redraw()
+            self.stat["power"].set(f"{t.power_w:.0f} W  /  {limit} W")
+            self.stat["util"].set(f"{t.util_gpu} %")
+            self.stat["vram"].set(f"{t.vram_used_mb} / {t.vram_total_mb} MB")
+            self.bar_power.set(min(1, t.power_w / max(1, limit)))
+            self.bar_util.set(t.util_gpu / 100)
+            self.bar_vram.set(t.vram_used_mb / max(1, t.vram_total_mb))
+            self._set_state_pill(t.throttle or "Sin limitaciones", C.warn if t.throttle else C.ok)
+
+        if self.fan_mode.get() == "curve" and self.fan_supported:      # la curva sigue activa en el tray
             target = 100 if t.temp >= SAFETY_TEMP else interpolate(self.get_curve(), t.temp)
             if self.last_fan is None or abs(target - self.last_fan) >= 3 or target == 100:
                 try:
@@ -774,11 +826,17 @@ class App(ctk.CTk):
                     self.last_fan = target
                 except BackendError as e:
                     self._fan_failed(str(e))
-        if self.current_page == "fan":
+        if not hidden and self.current_page == "fan":
             self._refresh_curve(t.temp)
-        self._poll_job = self.after(1000, self.poll)
+        self._poll_job = self.after(5000 if hidden else 1000, self.poll)   # en el tray: 5 s, bajo consumo
 
     def on_close(self) -> None:
+        if self.settings.tray_enabled:
+            self._hide_to_tray()                                       # la X minimiza a la bandeja
+        else:
+            self._exit_app()
+
+    def _exit_app(self) -> None:
         for job in (self._poll_job, self._startup_job):                  # sin tareas colgando al cerrar
             if job:
                 try:
