@@ -29,8 +29,11 @@ def is_supported() -> bool:
     return os.name == "nt"
 
 
-def launch_command() -> tuple[str, str, str]:
+def launch_command(exe_override: str | Path | None = None) -> tuple[str, str, str]:
     """(ejecutable, argumentos, carpeta de trabajo) con los que arranca la tarea."""
+    if exe_override is not None:                                     # p. ej. copia recién instalada
+        exe = Path(exe_override)
+        return str(exe), "--startup", str(exe.parent)
     if getattr(sys, "frozen", False):                                   # .exe de PyInstaller
         exe = Path(sys.executable)
         return str(exe), "--startup", str(exe.parent)
@@ -102,10 +105,11 @@ def is_enabled(runner: Runner = subprocess.run) -> bool:
         return False
 
 
-def enable(runner: Runner = subprocess.run, delay_s: int = 20) -> None:
+def enable(runner: Runner = subprocess.run, delay_s: int = 20,
+           exe_override: str | Path | None = None) -> None:
     if not is_supported():
         raise AutostartError("El inicio con el sistema solo está disponible en Windows.")
-    exe, args, workdir = launch_command()
+    exe, args, workdir = launch_command(exe_override)
     xml = build_task_xml(exe, args, workdir, current_user(), delay_s)
     with tempfile.NamedTemporaryFile("w", suffix=".xml", delete=False, encoding="utf-16") as f:
         f.write(xml)

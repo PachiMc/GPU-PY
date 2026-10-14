@@ -15,7 +15,7 @@ from led_i2c import FakeBus, NvapiBus, PalitLed, scan_report
 from led_nvapi import FakeNvapi, IllumLed, LedError, parse_color
 
 APP_NAME = "GPU PY"
-VERSION = "2.1"
+VERSION = "2.2"
 
 DEFAULT_CURVE: list[tuple[int, int]] = [(30, 30), (50, 40), (65, 60), (75, 80), (85, 100)]
 SAFETY_TEMP = 88          # por encima de esto el ventilador se fuerza al 100 %

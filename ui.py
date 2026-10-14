@@ -13,6 +13,7 @@ import customtkinter as ctk
 
 import autostart
 import icons
+import install
 import theme
 import tray
 from core import (APP_NAME, DEFAULT_CURVE, SAFETY_TEMP, VERSION, ProfileStore, Settings, apply_led_state,
@@ -607,6 +608,17 @@ class App(ctk.CTk):
         button(start.content, "Aplicar perfil de inicio ahora", lambda: self.run_startup(manual=True),
                "secondary").pack(anchor="w", pady=(16, 0))
 
+        inst = Card(page, "Instalación",
+                    "El inicio con Windows apunta a este archivo exacto. Instálalo en una "
+                    "carpeta permanente para que no se rompa si borras la descarga.")
+        inst.pack(fill="x", padx=PAD, pady=(0, GAP))
+        self.install_status = ctk.CTkLabel(inst.content, text="", font=font(12), text_color=C.muted,
+                                           anchor="w", wraplength=560, justify="left")
+        self.install_status.pack(fill="x", pady=(0, 12))
+        self.install_btn = button(inst.content, "Instalar en este equipo", self._do_install, "secondary")
+        self.install_btn.pack(anchor="w")
+        self._refresh_install_status()
+
         info = Card(page, "Información")
         info.pack(fill="x", padx=PAD, pady=(0, PAD))
         rows = [("Versión", f"{APP_NAME} {VERSION}"), ("GPU", self.be.name), ("Driver", self.be.driver),
@@ -633,11 +645,53 @@ class App(ctk.CTk):
     def _toggle_autostart(self) -> None:
         want = bool(self.autostart_var.get())
         try:
+            if want and install.should_suggest_install():
+                if ask(self, "Ubicación temporal",
+                       f"Estás ejecutando GPU PY desde:\n{install.current_exe().parent}\n\n"
+                       "Si esa carpeta se borra, el inicio automático dejará de funcionar. "
+                       f"¿Lo instalo en una carpeta permanente ({install.install_dir()})?",
+                       ok="Instalar y activar", cancel="Solo activar"):
+                    dst = install.install()
+                    autostart.enable(exe_override=dst)
+                    self._refresh_install_status()
+                    self.notify(f"Instalado en {dst}. Ya puedes borrar la descarga.", "ok")
+                    return
             autostart.enable() if want else autostart.disable()
             self.notify("GPU PY se iniciará con Windows." if want else "Inicio con Windows desactivado.", "ok")
         except autostart.AutostartError as e:
             self.autostart_var.set(0 if want else 1)
             self.alert("Inicio con Windows", str(e))
+        except install.InstallError as e:
+            self.autostart_var.set(0)
+            self.alert("Instalación", str(e))
+
+    def _refresh_install_status(self) -> None:
+        if not hasattr(self, "install_status"):
+            return
+        if not install.is_frozen():
+            self.install_status.configure(text="Ejecutando desde código fuente (no aplica instalación).")
+            self.install_btn.configure(state="disabled")
+        elif install.is_installed():
+            self.install_status.configure(text=f"Instalado en:\n{install.installed_exe()}")
+            self.install_btn.configure(state="disabled")
+        else:
+            self.install_status.configure(
+                text=f"Portable, ejecutándose desde:\n{install.current_exe()}\n"
+                     f"Se instalará en:\n{install.installed_exe()}")
+            self.install_btn.configure(state="normal")
+
+    def _do_install(self) -> None:
+        try:
+            dst = install.install()
+            if autostart.is_enabled():
+                autostart.enable(exe_override=dst)                     # la tarea apunta a la copia fija
+        except install.InstallError as e:
+            self.alert("Instalación", str(e))
+            return
+        except autostart.AutostartError as e:
+            self.alert("Inicio con Windows", str(e))
+        self._refresh_install_status()
+        self.notify(f"Instalado en {dst}. Ya puedes borrar la descarga.", "ok")
 
     def open_data_dir(self) -> None:
         path = str(data_dir())

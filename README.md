@@ -19,7 +19,7 @@ No necesitas instalar Python. Descarga el ejecutable listo para usar:
 
 1. Descarga `GPU-PY.exe`.
 2. Doble clic (Windows pedirá **Administrador** automáticamente, necesario para aplicar cambios).
-3. Listo: la app se abre y puedes monitorear tu GPU.
+3. En **Ajustes** pulsa **Instalar en este equipo** (lo copia a una carpeta permanente; si activas el inicio con Windows desde Descargas, te lo propone solo).
 
 > ¿Prefieres compilarlo tú? Mira [🛠️ Compilar el .exe](#️-compilar-el-exe).
 
@@ -56,9 +56,10 @@ En **Ajustes** activa *Iniciar GPU PY al iniciar sesión* (con la app abierta co
 - Opcional: *Iniciar minimizado* + *Perfil al iniciar* (aplica overclock, ventiladores y LED automáticamente). Con *Bandeja del sistema* activado, arranca directamente en el tray.
 - Si el driver tarda en estar listo, GPU PY reintenta aplicar el perfil hasta 3 veces.
 - Sin interfaz:
-  ```bat
-  python gpupy.py --autostart on|off|status
-  ```
+```bat
+python gpupy.py --autostart on|off|status
+GPU-PY.exe --install              copia el .exe a una carpeta permanente
+```
 
 ## ⌨️ Línea de comandos
 
@@ -94,7 +95,7 @@ python -m PyInstaller --noconfirm --onefile --windowed --uac-admin --name "GPU P
 
 - `gpupy.py` — punto de entrada y línea de comandos
 - `ui.py` — ventana principal y páginas · `widgets.py` — componentes · `theme.py` — diseño · `icons.py` — iconos
-- `core.py` — perfiles, ajustes y lógica · `autostart.py` — inicio con Windows · `tray.py` — icono en la bandeja
+- `core.py` — perfiles, ajustes y lógica · `autostart.py` — inicio con Windows · `tray.py` — icono en la bandeja · `install.py` — auto-instalación
 - `gpu_backend.py` (NVML) · `oc_nvapi.py` · `led_nvapi.py` · `led_i2c.py` — acceso al hardware
 
 ## ⚠️ Seguridad y notas

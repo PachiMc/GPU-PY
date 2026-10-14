@@ -20,6 +20,7 @@ import sys
 from pathlib import Path
 
 import autostart
+import install
 from core import (APP_NAME, ProfileStore, apply_led_state, apply_profile_to_backend, default_led_state,
                   i2c_scan_text, make_led, oc_info_text)
 from gpu_backend import BackendError, DemoBackend, NvmlBackend
@@ -59,6 +60,7 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--i2c-scan", action="store_true", help="diagnóstico de solo lectura del LED por I2C")
     ap.add_argument("--oc-info", action="store_true", help="mostrar qué overclock permite tu GPU")
     ap.add_argument("--autostart", choices=("on", "off", "status"), help="gestionar el inicio con Windows")
+    ap.add_argument("--install", action="store_true", help="copiar el .exe a una carpeta permanente y salir")
     a = ap.parse_args(argv)
 
     if a.list:
@@ -78,6 +80,14 @@ def main(argv: list[str] | None = None) -> None:
                     print("Inicio con Windows:", "ACTIVADO" if autostart.is_enabled() else "desactivado")
         except autostart.AutostartError as e:
             fatal(str(e), gui=False)
+        return
+
+    if a.install:
+        try:
+            dst = install.install()
+        except install.InstallError as e:
+            fatal(str(e), gui=False)
+        print(f"Instalado en {dst}")
         return
 
     if a.i2c_scan:
