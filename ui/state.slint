@@ -1,0 +1,139 @@
+// Estado compartido entre la interfaz y Rust (equivale a las variables tk de la versión Python).
+export global State {
+    // ---- navegación e información ----
+    in-out property <int> page: 0;
+    in property <string> gpu-name: "NVIDIA GeForce";
+    in property <string> driver: "?";
+    in property <string> version: "";
+    in property <bool> is-admin;
+    in property <bool> demo;
+
+    // ---- monitor ----
+    in property <float> g-temp;
+    in property <float> g-core;
+    in property <float> g-mem;
+    in property <float> g-fan;
+    in property <float> g-core-max: 2100;
+    in property <float> g-mem-max: 8000;
+    in property <string> hist-grid;
+    in property <string> hist-temp;
+    in property <string> hist-util;
+    in property <string> hist-power;
+    in property <string> hist-temp-fill;
+    in property <string> stat-power: "--";
+    in property <string> stat-util: "--";
+    in property <string> stat-vram: "--";
+    in property <float> bar-power;
+    in property <float> bar-util;
+    in property <float> bar-vram;
+    in property <string> throttle: "Sin limitaciones";
+    in property <bool> throttled;
+
+    // ---- overclock ----
+    in property <string> oc-notice;
+    in property <string> oc-notice-kind: "warn";
+    in property <int> power-min: 100;
+    in property <int> power-max: 220;
+    in property <int> core-min: -300;
+    in property <int> core-max: 250;
+    in property <int> mem-min: -1000;
+    in property <int> mem-max: 1000;
+    in property <int> lock-range-max: 2100;
+    in-out property <int> power: 220;
+    in-out property <int> core;
+    in-out property <int> mem;
+    in-out property <bool> lock-on;
+    in-out property <int> lock-mhz: 2100;
+    callback apply-oc();
+    callback reset-all();
+
+    // ---- ventiladores ----
+    in property <bool> fan-supported: true;
+    in-out property <int> fan-mode; // 0 auto · 1 manual · 2 curva
+    in-out property <int> fan-manual: 50;
+    in-out property <string> ct1;
+    in-out property <string> ct2;
+    in-out property <string> ct3;
+    in-out property <string> ct4;
+    in-out property <string> ct5;
+    in-out property <string> cp1;
+    in-out property <string> cp2;
+    in-out property <string> cp3;
+    in-out property <string> cp4;
+    in-out property <string> cp5;
+    in property <string> curve-grid;
+    in property <string> curve-line;
+    in property <string> curve-points;
+    in property <float> safety-x;
+    in property <float> marker-x: -1;
+    in property <float> marker-y;
+    callback curve-edited();
+    callback apply-fan();
+
+    // ---- LED ----
+    in property <string> led-info;
+    in property <bool> led-ok;
+    in property <[string]> led-modes: ["No cambiar", "Color fijo", "Respiración", "Apagado"];
+    in property <bool> led-effects;
+    in property <int> led-zone-count;
+    in-out property <int> led-mode;
+    in-out property <int> led-edit: 0; // color que editan los controles: 0 = A, 1 = B
+    in-out property <int> r1: 255;
+    in-out property <int> g1: 45;
+    in-out property <int> b1: 85;
+    in-out property <int> r2;
+    in-out property <int> g2;
+    in-out property <int> b2;
+    in-out property <int> led-bright: 100;
+    in-out property <int> led-period: 3000;
+    in-out property <int> led-speed: 50;
+    in-out property <bool> led-reverse;
+    in-out property <[bool]> led-zones;
+    in-out property <string> hex-edit;
+    pure callback hex-of(int, int, int) -> string;
+    callback led-color-changed();
+    callback hex-entered(string);
+    callback zone-toggled(int, bool);
+    callback apply-led();
+    callback led-default();
+
+    // ---- perfiles ----
+    in property <[string]> profiles;
+    in-out property <int> profile-sel: -1;
+    in property <string> profile-info: "Selecciona un perfil de la lista.";
+    in-out property <string> pname;
+    callback select-profile(int);
+    callback save-profile();
+    callback load-profile();
+    callback delete-profile();
+
+    // ---- ajustes ----
+    in property <bool> autostart-supported;
+    in-out property <bool> autostart-on;
+    in-out property <bool> start-minimized: true;
+    in-out property <bool> tray-enabled: true;
+    in property <[string]> startup-profiles: ["Ninguno"];
+    in-out property <string> startup-choice: "Ninguno";
+    in property <string> install-status;
+    in property <bool> install-enabled;
+    in property <string> perm-text;
+    in property <string> data-dir;
+    callback settings-changed();
+    callback autostart-toggled();
+    callback run-startup();
+    callback do-install();
+    callback open-data-dir();
+
+    // ---- diálogo modal y avisos ----
+    in property <bool> dialog-visible;
+    in property <string> dialog-title;
+    in property <string> dialog-message;
+    in property <string> dialog-ok: "Aceptar";
+    in property <string> dialog-cancel; // vacío = sin botón cancelar
+    in property <bool> dialog-danger;
+    callback dialog-accept();
+    callback dialog-dismiss();
+    in property <bool> toast-visible;
+    in property <string> toast-text;
+    in property <string> toast-kind: "ok";
+}

@@ -1,0 +1,517 @@
+import { ScrollView, ComboBox } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import { State } from "state.slint";
+import { Card, PageHeader, AppButton, Pill, Notice, LabeledSlider, SwitchRow, Checkbox, Segmented, Field, ProgressBar, Gauge } from "widgets.slint";
+
+// ---------------------------------------------------------------------------------------------
+// Monitor
+// ---------------------------------------------------------------------------------------------
+export component MonitorPage inherits ScrollView {
+    VerticalLayout {
+        padding: Theme.pad;
+        spacing: Theme.gap;
+        alignment: start;
+        PageHeader { title: "Monitor"; subtitle: "Estado de tu GPU en tiempo real."; }
+        Card {
+            HorizontalLayout {
+                alignment: space-around;
+                Gauge { label: "TEMPERATURA"; unit: "°C"; value: State.g-temp; vmax: 100; base: Theme.accent2; warn-lo: 75; warn-hi: 85; }
+                Gauge { label: "NÚCLEO"; unit: "MHz"; value: State.g-core; vmax: State.g-core-max; base: Theme.accent; }
+                Gauge { label: "MEMORIA"; unit: "MHz"; value: State.g-mem; vmax: State.g-mem-max; base: Theme.violet; }
+                Gauge { label: "VENTILADOR"; unit: "%"; value: State.g-fan; vmax: 100; base: Theme.ok; }
+            }
+        }
+        HorizontalLayout {
+            spacing: Theme.gap;
+            Card {
+                title: "Historial";
+                subtitle: "Últimos 2 minutos";
+                Rectangle {
+                    height: 190px;
+                    for v in [0, 25, 50, 75, 100]: Text {
+                        x: 0;
+                        width: 26px;
+                        y: 8px + 172px * (1 - v / 100) - self.height / 2;
+                        text: v;
+                        font-size: 10px;
+                        color: Theme.muted;
+                        horizontal-alignment: right;
+                    }
+                    Path { width: parent.width; height: 190px; viewbox-width: 520; viewbox-height: 190; commands: State.hist-grid; stroke: Theme.track; stroke-width: 1px; }
+                    Path { width: parent.width; height: 190px; viewbox-width: 520; viewbox-height: 190; commands: State.hist-temp-fill; fill: Theme.accent2.with-alpha(0.14); }
+                    Path { width: parent.width; height: 190px; viewbox-width: 520; viewbox-height: 190; commands: State.hist-temp; stroke: Theme.accent2; stroke-width: 2.4px; }
+                    Path { width: parent.width; height: 190px; viewbox-width: 520; viewbox-height: 190; commands: State.hist-util; stroke: Theme.accent; stroke-width: 2.4px; }
+                    Path { width: parent.width; height: 190px; viewbox-width: 520; viewbox-height: 190; commands: State.hist-power; stroke: Theme.warn; stroke-width: 2.4px; }
+                }
+                HorizontalLayout {
+                    spacing: 4px;
+                    alignment: start;
+                    Text { text: "●"; color: Theme.accent2; font-size: 12px; }
+                    Text { text: "Temperatura °C   "; color: Theme.muted; font-size: 12px; }
+                    Text { text: "●"; color: Theme.accent; font-size: 12px; }
+                    Text { text: "Uso GPU %   "; color: Theme.muted; font-size: 12px; }
+                    Text { text: "●"; color: Theme.warn; font-size: 12px; }
+                    Text { text: "Potencia % del límite"; color: Theme.muted; font-size: 12px; }
+                }
+            }
+            Card {
+                title: "Detalles";
+                width: 290px;
+                VerticalLayout {
+                    spacing: 4px;
+                    Text { text: "Potencia"; font-size: 12px; color: Theme.muted; }
+                    Text { text: State.stat-power; font-size: 15px; font-weight: 700; color: Theme.text; }
+                    ProgressBar { value: State.bar-power; }
+                    Rectangle { height: 8px; }
+                    Text { text: "Uso de GPU"; font-size: 12px; color: Theme.muted; }
+                    Text { text: State.stat-util; font-size: 15px; font-weight: 700; color: Theme.text; }
+                    ProgressBar { value: State.bar-util; }
+                    Rectangle { height: 8px; }
+                    Text { text: "VRAM"; font-size: 12px; color: Theme.muted; }
+                    Text { text: State.stat-vram; font-size: 15px; font-weight: 700; color: Theme.text; }
+                    ProgressBar { value: State.bar-vram; }
+                    Rectangle { height: 8px; }
+                    Text { text: "Estado"; font-size: 12px; color: Theme.muted; }
+                    HorizontalLayout {
+                        alignment: start;
+                        Pill { text: State.throttle; tone: State.throttled ? Theme.warn : Theme.ok; }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Overclock
+// ---------------------------------------------------------------------------------------------
+export component OcPage inherits ScrollView {
+    VerticalLayout {
+        padding: Theme.pad;
+        spacing: Theme.gap;
+        alignment: start;
+        PageHeader { title: "Overclock"; subtitle: "Ajusta potencia y frecuencias. Los cambios se pierden al reiniciar el PC."; }
+        if State.oc-notice != "": Notice { text: State.oc-notice; kind: State.oc-notice-kind; }
+        Card {
+            title: "Potencia y frecuencias";
+            LabeledSlider {
+                title: "Límite de potencia";
+                hint: "Rango del driver: " + State.power-min + "–" + State.power-max + " W";
+                minimum: State.power-min; maximum: State.power-max; step: 1; unit: " W"; accent: Theme.warn;
+                value <=> State.power;
+            }
+            LabeledSlider {
+                title: "Offset del núcleo";
+                hint: "Súbelo de 15 en 15 MHz y prueba la estabilidad";
+                minimum: State.core-min; maximum: State.core-max; step: 5; unit: " MHz"; signed: true; accent: Theme.accent;
+                value <=> State.core;
+            }
+            LabeledSlider {
+                title: "Offset de la memoria";
+                hint: "Escala del driver (igual que VelocityX). Sube de 50 en 50";
+                minimum: State.mem-min; maximum: State.mem-max; step: 10; unit: " MHz"; signed: true; accent: Theme.violet;
+                value <=> State.mem;
+            }
+        }
+        Card {
+            title: "Techo de reloj";
+            subtitle: "Útil para undervolt: limita la frecuencia máxima del núcleo.";
+            SwitchRow { title: "Activar techo de reloj"; checked <=> State.lock-on; }
+            LabeledSlider {
+                title: "Reloj máximo del núcleo";
+                minimum: 800; maximum: State.lock-range-max; step: 15; unit: " MHz"; accent: Theme.accent2;
+                value <=> State.lock-mhz;
+            }
+        }
+        HorizontalLayout {
+            spacing: 10px;
+            alignment: start;
+            AppButton { text: "Aplicar"; kind: "primary"; min-width: 140px; clicked => { State.apply-oc(); } }
+            AppButton { text: "Valores de fábrica"; min-width: 170px; clicked => { State.reset-all(); } }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Ventiladores
+// ---------------------------------------------------------------------------------------------
+component CurveRowEdit inherits HorizontalLayout {
+    in property <int> index;
+    in-out property <string> t;
+    in-out property <string> p;
+    callback changed();
+    spacing: 4px;
+    Text { text: "Punto " + root.index; font-size: 12px; color: Theme.muted; vertical-alignment: center; width: 58px; }
+    Field { width: 64px; text <=> root.t; edited(_) => { root.changed(); } }
+    Text { text: "°C"; font-size: 12px; color: Theme.muted; vertical-alignment: center; width: 28px; horizontal-alignment: center; }
+    Field { width: 64px; text <=> root.p; edited(_) => { root.changed(); } }
+    Text { text: "%"; font-size: 12px; color: Theme.muted; vertical-alignment: center; width: 20px; horizontal-alignment: center; }
+}
+
+export component FanPage inherits ScrollView {
+    VerticalLayout {
+        padding: Theme.pad;
+        spacing: Theme.gap;
+        alignment: start;
+        PageHeader { title: "Ventiladores"; subtitle: "Control automático, fijo o con una curva personalizada."; }
+        if !State.fan-supported: Notice { text: "No se detectaron ventiladores controlables por NVML."; kind: "warn"; }
+        Card {
+            title: "Modo";
+            HorizontalLayout {
+                alignment: start;
+                Segmented { model: ["Automático", "Manual", "Curva"]; current-index <=> State.fan-mode; }
+            }
+        }
+        Card {
+            title: "Velocidad fija";
+            LabeledSlider { title: "Velocidad manual"; minimum: 30; maximum: 100; unit: " %"; accent: Theme.ok; value <=> State.fan-manual; }
+        }
+        Card {
+            title: "Curva personalizada";
+            subtitle: "A ≥ 88 °C el ventilador se fuerza al 100 % y al cerrar GPU PY vuelve a automático.";
+            HorizontalLayout {
+                spacing: 24px;
+                alignment: start;
+                Rectangle {
+                    width: 440px;
+                    height: 250px;
+                    for v in [0, 25, 50, 75, 100]: Text {
+                        x: 0;
+                        width: 28px;
+                        y: 8px + 218px * (1 - v / 100) - self.height / 2;
+                        text: v;
+                        font-size: 10px;
+                        color: Theme.muted;
+                        horizontal-alignment: right;
+                    }
+                    for t in [20, 35, 50, 65, 80, 95]: Text {
+                        x: 34px + 394px * (t - 20) / 75 - 20px;
+                        y: 232px;
+                        width: 40px;
+                        text: t + "°";
+                        font-size: 10px;
+                        color: Theme.muted;
+                        horizontal-alignment: center;
+                    }
+                    Path { width: 440px; height: 250px; viewbox-width: 440; viewbox-height: 250; commands: State.curve-grid; stroke: Theme.track; stroke-width: 1px; }
+                    Path { width: 440px; height: 250px; viewbox-width: 440; viewbox-height: 250; commands: State.curve-line; stroke: Theme.ok; stroke-width: 2.6px; }
+                    Path { width: 440px; height: 250px; viewbox-width: 440; viewbox-height: 250; commands: State.curve-points; stroke: Theme.ok; stroke-width: 2px; fill: Theme.surface; }
+                    Rectangle {
+                        visible: State.marker-x >= 0;
+                        x: State.marker-x * 1px - 1px;
+                        y: 8px;
+                        width: 2px;
+                        height: 218px;
+                        background: Theme.warn.with-alpha(0.78);
+                    }
+                    Rectangle {
+                        x: State.safety-x * 1px;
+                        y: 8px;
+                        width: 1px;
+                        height: 218px;
+                        background: Theme.danger.with-alpha(0.5);
+                    }
+                }
+                VerticalLayout {
+                    spacing: 6px;
+                    alignment: start;
+                    HorizontalLayout {
+                        spacing: 4px;
+                        Rectangle { width: 58px; }
+                        Text { text: "Temperatura"; font-size: 11px; font-weight: 700; color: Theme.muted; horizontal-alignment: center; width: 96px; }
+                        Text { text: "Velocidad"; font-size: 11px; font-weight: 700; color: Theme.muted; horizontal-alignment: center; width: 88px; }
+                    }
+                    CurveRowEdit { index: 1; t <=> State.ct1; p <=> State.cp1; changed => { State.curve-edited(); } }
+                    CurveRowEdit { index: 2; t <=> State.ct2; p <=> State.cp2; changed => { State.curve-edited(); } }
+                    CurveRowEdit { index: 3; t <=> State.ct3; p <=> State.cp3; changed => { State.curve-edited(); } }
+                    CurveRowEdit { index: 4; t <=> State.ct4; p <=> State.cp4; changed => { State.curve-edited(); } }
+                    CurveRowEdit { index: 5; t <=> State.ct5; p <=> State.cp5; changed => { State.curve-edited(); } }
+                }
+            }
+        }
+        HorizontalLayout {
+            alignment: start;
+            AppButton { text: "Aplicar"; kind: "primary"; min-width: 140px; clicked => { State.apply-fan(); } }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// LED / RGB
+// ---------------------------------------------------------------------------------------------
+component Swatch inherits Rectangle {
+    in property <string> title;
+    in property <int> r;
+    in property <int> g;
+    in property <int> b;
+    in property <bool> active;
+    callback clicked();
+    width: 190px;
+    height: 80px;
+    VerticalLayout {
+        spacing: 4px;
+        Text { text: root.title; font-size: 12px; color: Theme.muted; }
+        Rectangle {
+            height: 56px;
+            border-radius: Theme.radius-sm;
+            border-width: root.active ? 2px : 1px;
+            border-color: root.active ? Theme.accent : Theme.border;
+            background: rgb(root.r, root.g, root.b);
+            Text {
+                text: State.hex-of(root.r, root.g, root.b).to-uppercase();
+                font-size: 14px;
+                font-weight: 700;
+                color: (root.r * 299 + root.g * 587 + root.b * 114) / 1000 > 150 ? #0B0F17 : #FFFFFF;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+            TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
+        }
+    }
+}
+
+export component LedPage inherits ScrollView {
+    VerticalLayout {
+        padding: Theme.pad;
+        spacing: Theme.gap;
+        alignment: start;
+        PageHeader { title: "LED / RGB"; subtitle: "Iluminación de tu tarjeta con el mismo mecanismo que VelocityX."; }
+        Notice { text: State.led-info; kind: State.led-ok ? "ok" : "warn"; }
+        Card {
+            title: "Efecto";
+            HorizontalLayout {
+                alignment: start;
+                Segmented { model: State.led-modes; current-index <=> State.led-mode; }
+            }
+        }
+        Card {
+            title: "Colores";
+            subtitle: "Pulsa un color para editarlo con los controles de abajo.";
+            HorizontalLayout {
+                spacing: 28px;
+                alignment: start;
+                Swatch { title: "Color A"; r: State.r1; g: State.g1; b: State.b1; active: State.led-edit == 0; clicked => { State.led-edit = 0; State.led-color-changed(); } }
+                Swatch { title: "Color B (respiración)"; r: State.r2; g: State.g2; b: State.b2; active: State.led-edit == 1; clicked => { State.led-edit = 1; State.led-color-changed(); } }
+            }
+            if State.led-edit == 0: VerticalLayout {
+                spacing: 10px;
+                LabeledSlider { title: "Rojo"; minimum: 0; maximum: 255; accent: #FF5C6C; value <=> State.r1; changed(_) => { State.led-color-changed(); } }
+                LabeledSlider { title: "Verde"; minimum: 0; maximum: 255; accent: Theme.ok; value <=> State.g1; changed(_) => { State.led-color-changed(); } }
+                LabeledSlider { title: "Azul"; minimum: 0; maximum: 255; accent: Theme.accent; value <=> State.b1; changed(_) => { State.led-color-changed(); } }
+            }
+            if State.led-edit == 1: VerticalLayout {
+                spacing: 10px;
+                LabeledSlider { title: "Rojo"; minimum: 0; maximum: 255; accent: #FF5C6C; value <=> State.r2; changed(_) => { State.led-color-changed(); } }
+                LabeledSlider { title: "Verde"; minimum: 0; maximum: 255; accent: Theme.ok; value <=> State.g2; changed(_) => { State.led-color-changed(); } }
+                LabeledSlider { title: "Azul"; minimum: 0; maximum: 255; accent: Theme.accent; value <=> State.b2; changed(_) => { State.led-color-changed(); } }
+            }
+            HorizontalLayout {
+                spacing: 10px;
+                alignment: start;
+                Text { text: "Hex"; font-size: 12px; color: Theme.muted; vertical-alignment: center; }
+                Field { width: 110px; text <=> State.hex-edit; placeholder: "#RRGGBB"; edited(t) => { State.hex-entered(t); } }
+                Text { text: "Rápidos"; font-size: 12px; color: Theme.muted; vertical-alignment: center; }
+                for c in [#ff2d55, #ff9500, #ffd60a, #30d158, #00c7be, #0a84ff, #bf5af2, #ffffff]: Rectangle {
+                    width: 32px;
+                    height: 32px;
+                    border-radius: 8px;
+                    background: c;
+                    border-width: 1px;
+                    border-color: Theme.border;
+                    TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => {
+                            State.r1 = c.red;
+                            State.g1 = c.green;
+                            State.b1 = c.blue;
+                            State.led-edit = 0;
+                            State.led-color-changed();
+                        }
+                    }
+                }
+            }
+        }
+        Card {
+            title: "Parámetros";
+            LabeledSlider { title: "Brillo"; minimum: 0; maximum: 100; unit: " %"; accent: Theme.warn; value <=> State.led-bright; }
+            LabeledSlider { title: "Ciclo de respiración"; minimum: 1000; maximum: 10000; step: 100; unit: " ms"; accent: Theme.accent2; value <=> State.led-period; }
+            if State.led-effects: LabeledSlider {
+                title: "Velocidad de ciclo / estrobo";
+                hint: "Valor crudo del controlador (1–100)";
+                minimum: 1; maximum: 100; accent: Theme.violet;
+                value <=> State.led-speed;
+            }
+            if State.led-effects: HorizontalLayout {
+                alignment: start;
+                Checkbox { text: "Invertir dirección"; checked <=> State.led-reverse; }
+            }
+        }
+        if State.led-zone-count > 1: Card {
+            title: "Zonas";
+            HorizontalLayout {
+                spacing: 18px;
+                alignment: start;
+                for z[i] in State.led-zones: Checkbox {
+                    text: "Zona " + i;
+                    checked: z;
+                    toggled(v) => { State.zone-toggled(i, v); }
+                }
+            }
+        }
+        HorizontalLayout {
+            spacing: 10px;
+            alignment: start;
+            AppButton { text: "Aplicar LED"; kind: "primary"; min-width: 150px; clicked => { State.apply-led(); } }
+            AppButton { text: "Restaurar original"; min-width: 180px; clicked => { State.led-default(); } }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Perfiles
+// ---------------------------------------------------------------------------------------------
+export component ProfilesPage inherits ScrollView {
+    VerticalLayout {
+        padding: Theme.pad;
+        spacing: Theme.gap;
+        alignment: start;
+        PageHeader { title: "Perfiles"; subtitle: "Guarda tus ajustes de overclock, ventiladores y LED y cárgalos con un clic."; }
+        HorizontalLayout {
+            spacing: Theme.gap;
+            Card {
+                title: "Guardados";
+                Rectangle {
+                    height: 260px;
+                    background: Theme.surface2;
+                    border-radius: Theme.radius-sm;
+                    if State.profiles.length == 0: Text {
+                        text: "Aún no hay perfiles.";
+                        color: Theme.muted;
+                        font-size: 12px;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                    ScrollView {
+                        VerticalLayout {
+                            padding: 4px;
+                            spacing: 4px;
+                            alignment: start;
+                            for name[i] in State.profiles: Rectangle {
+                                height: 38px;
+                                border-radius: 8px;
+                                background: i == State.profile-sel ? Theme.accent.with-alpha(0.3) : ta.has-hover ? Theme.track : transparent;
+                                Text {
+                                    x: 12px;
+                                    text: name;
+                                    font-size: 13px;
+                                    font-weight: 700;
+                                    color: Theme.text;
+                                    vertical-alignment: center;
+                                }
+                                ta := TouchArea { mouse-cursor: pointer; clicked => { State.select-profile(i); } }
+                            }
+                        }
+                    }
+                }
+            }
+            Card {
+                title: "Detalles";
+                VerticalLayout {
+                    spacing: 6px;
+                    Text {
+                        text: State.profile-info;
+                        font-size: 13px;
+                        color: State.profile-sel >= 0 ? Theme.text : Theme.muted;
+                        wrap: word-wrap;
+                    }
+                    Rectangle { height: 8px; }
+                    Text { text: "Nombre"; font-size: 12px; color: Theme.muted; }
+                    Field { text <=> State.pname; placeholder: "Ej. Gaming"; align: left; }
+                    Rectangle { height: 8px; }
+                    AppButton { text: "Guardar ajustes actuales"; kind: "primary"; clicked => { State.save-profile(); } }
+                    AppButton { text: "Cargar y aplicar"; clicked => { State.load-profile(); } }
+                    AppButton { text: "Eliminar"; kind: "danger"; clicked => { State.delete-profile(); } }
+                }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Ajustes
+// ---------------------------------------------------------------------------------------------
+export component SettingsPage inherits ScrollView {
+    VerticalLayout {
+        padding: Theme.pad;
+        spacing: Theme.gap;
+        alignment: start;
+        PageHeader { title: "Ajustes"; subtitle: "Inicio con el sistema e información de la aplicación."; }
+        Card {
+            title: "Inicio con Windows";
+            subtitle: "GPU PY crea una tarea del Programador de tareas con privilegios elevados, así Windows no pide permiso de administrador cada vez.";
+            SwitchRow {
+                title: "Iniciar GPU PY al iniciar sesión";
+                hint: State.autostart-supported ? "Se abre unos segundos después de entrar a Windows." : "Solo disponible en Windows.";
+                enabled: State.autostart-supported;
+                checked <=> State.autostart-on;
+                toggled(_) => { State.autostart-toggled(); }
+            }
+            SwitchRow {
+                title: "Iniciar minimizado";
+                hint: "Arranca en la barra de tareas o la bandeja, sin abrir la ventana.";
+                checked <=> State.start-minimized;
+                toggled(_) => { State.settings-changed(); }
+            }
+            SwitchRow {
+                title: "Bandeja del sistema (tray)";
+                hint: "Minimizar y la X llevan a la bandeja; clic derecho para salir.";
+                checked <=> State.tray-enabled;
+                toggled(_) => { State.settings-changed(); }
+            }
+            HorizontalLayout {
+                spacing: 12px;
+                VerticalLayout {
+                    Text { text: "Perfil al iniciar"; font-size: 14px; font-weight: 700; color: Theme.text; }
+                    Text { text: "Aplica automáticamente overclock, ventiladores y LED."; font-size: 12px; color: Theme.muted; wrap: word-wrap; }
+                }
+                ComboBox {
+                    width: 190px;
+                    model: State.startup-profiles;
+                    current-value <=> State.startup-choice;
+                    selected(_) => { State.settings-changed(); }
+                }
+            }
+            HorizontalLayout {
+                alignment: start;
+                AppButton { text: "Aplicar perfil de inicio ahora"; clicked => { State.run-startup(); } }
+            }
+        }
+        Card {
+            title: "Instalación";
+            subtitle: "El inicio con Windows apunta a este archivo exacto. Instálalo en una carpeta permanente para que no se rompa si borras la descarga.";
+            Text { text: State.install-status; font-size: 12px; color: Theme.muted; wrap: word-wrap; }
+            HorizontalLayout {
+                alignment: start;
+                AppButton { text: "Instalar en este equipo"; enabled: State.install-enabled; clicked => { State.do-install(); } }
+            }
+        }
+        Card {
+            title: "Información";
+            for row in [
+                { k: "Versión", v: "GPU PY " + State.version },
+                { k: "GPU", v: State.gpu-name },
+                { k: "Driver", v: State.driver },
+                { k: "Permisos", v: State.perm-text },
+                { k: "Datos", v: State.data-dir },
+            ]: HorizontalLayout {
+                spacing: 10px;
+                Text { text: row.k; font-size: 12px; color: Theme.muted; width: 90px; }
+                Text { text: row.v; font-size: 13px; color: Theme.text; wrap: word-wrap; }
+            }
+            HorizontalLayout {
+                alignment: start;
+                AppButton { text: "Abrir carpeta de datos"; clicked => { State.open-data-dir(); } }
+            }
+        }
+    }
+}

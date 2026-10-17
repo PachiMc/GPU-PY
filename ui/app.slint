@@ -1,0 +1,209 @@
+import { ScrollView } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import { State } from "state.slint";
+import { NavButton, Pill, AppButton } from "widgets.slint";
+import { MonitorPage, OcPage, FanPage, LedPage, ProfilesPage, SettingsPage } from "pages.slint";
+
+export { State, Theme }
+
+export component AppWindow inherits Window {
+    title: "GPU PY";
+    icon: @image-url("../assets/gpupy.png");
+    preferred-width: 1120px;
+    preferred-height: 760px;
+    min-width: 1020px;
+    min-height: 700px;
+    background: Theme.bg;
+    default-font-family: Theme.font;
+
+    HorizontalLayout {
+        // ---- barra lateral ----
+        Rectangle {
+            width: 236px;
+            background: Theme.sidebar;
+            VerticalLayout {
+                padding-left: 14px;
+                padding-right: 14px;
+                padding-bottom: 22px;
+                HorizontalLayout {
+                    padding-left: 8px;
+                    padding-top: 26px;
+                    padding-bottom: 22px;
+                    spacing: 10px;
+                    alignment: start;
+                    Image { source: @image-url("../assets/gpupy.png"); width: 38px; height: 38px; }
+                    Text { text: "GPU"; font-size: 22px; font-weight: 700; color: Theme.text; vertical-alignment: center; horizontal-stretch: 0; }
+                    Text { text: "PY"; font-size: 22px; font-weight: 700; color: Theme.accent; vertical-alignment: center; horizontal-stretch: 0; }
+                }
+                VerticalLayout {
+                    spacing: 4px;
+                    NavButton { label: "Monitor"; icon: "monitor"; active: State.page == 0; clicked => { State.page = 0; } }
+                    NavButton { label: "Overclock"; icon: "bolt"; active: State.page == 1; clicked => { State.page = 1; } }
+                    NavButton { label: "Ventiladores"; icon: "fan"; active: State.page == 2; clicked => { State.page = 2; } }
+                    NavButton { label: "LED / RGB"; icon: "led"; active: State.page == 3; clicked => { State.page = 3; } }
+                    NavButton { label: "Perfiles"; icon: "profiles"; active: State.page == 4; clicked => { State.page = 4; } }
+                    NavButton { label: "Ajustes"; icon: "settings"; active: State.page == 5; clicked => { State.page = 5; } }
+                }
+                Rectangle { vertical-stretch: 1; }
+                VerticalLayout {
+                    vertical-stretch: 0;
+                    alignment: end;
+                    padding-left: 8px;
+                    spacing: 2px;
+                    Text { text: State.gpu-name; font-size: 13px; font-weight: 700; color: Theme.text; wrap: word-wrap; }
+                    Text { text: "Driver " + State.driver + " · v" + State.version; font-size: 11px; color: Theme.muted; }
+                    Rectangle { height: 8px; }
+                    HorizontalLayout {
+                        alignment: start;
+                        Pill { text: State.is-admin ? "Administrador" : "Sin permisos"; tone: State.is-admin ? Theme.ok : Theme.warn; }
+                    }
+                    if State.demo: HorizontalLayout {
+                        padding-top: 6px;
+                        alignment: start;
+                        Pill { text: "Modo demo"; tone: Theme.violet; }
+                    }
+                }
+            }
+        }
+        // ---- páginas ----
+        Rectangle {
+            if State.page == 0: MonitorPage { }
+            if State.page == 1: OcPage { }
+            if State.page == 2: FanPage { }
+            if State.page == 3: LedPage { }
+            if State.page == 4: ProfilesPage { }
+            if State.page == 5: SettingsPage { }
+        }
+    }
+
+    // ---- diálogo modal ----
+    // Alto = suma de piezas de tamaño conocido; el mensaje (el único texto variable) tiene su propia
+    // zona con tope de 260 px y barra de desplazamiento, así que el diálogo nunca crece sin control.
+    if State.dialog-visible: Rectangle {
+        width: root.width;
+        height: root.height;
+        background: #000000a0;
+        TouchArea { }
+        FocusScope {
+            init => { self.focus(); }
+            key-pressed(e) => {
+                if (e.text == Key.Escape && State.dialog-cancel != "") {
+                    State.dialog-dismiss();
+                    return accept;
+                }
+                if (e.text == Key.Return) {
+                    State.dialog-accept();
+                    return accept;
+                }
+                reject
+            }
+        }
+        Rectangle {
+            private property <length> msg-h: Math.min(260px, Math.max(20px, msg.preferred-height));
+            width: Math.min(460px, root.width - 48px);
+            height: 26px + 28px + 10px + msg-h + 10px + 38px + 26px;
+            background: Theme.surface;
+            border-radius: Theme.radius;
+            border-width: 1px;
+            border-color: Theme.border;
+            Text {
+                x: 26px;
+                y: 26px;
+                width: parent.width - 52px;
+                height: 28px;
+                text: State.dialog-title;
+                font-size: 20px;
+                font-weight: 700;
+                color: Theme.text;
+                overflow: elide;
+            }
+            ScrollView {
+                x: 26px;
+                y: 64px;
+                width: parent.width - 52px;
+                height: parent.msg-h;
+                content-width: self.width;
+                content-height: msg.preferred-height;
+                msg := Text {
+                    width: parent.content-width;
+                    text: State.dialog-message;
+                    font-size: 13px;
+                    color: Theme.muted;
+                    wrap: word-wrap;
+                }
+            }
+            HorizontalLayout {
+                x: 26px;
+                y: parent.height - 26px - 38px;
+                width: parent.width - 52px;
+                height: 38px;
+                spacing: 10px;
+                alignment: end;
+                if State.dialog-cancel != "": AppButton { text: State.dialog-cancel; clicked => { State.dialog-dismiss(); } }
+                AppButton { text: State.dialog-ok; kind: State.dialog-danger ? "danger" : "primary"; min-width: 120px; clicked => { State.dialog-accept(); } }
+            }
+        }
+    }
+
+    // ---- aviso (toast) ----
+    // Se mide el texto en UNA línea (un `Text` invisible sin salto de línea) y de ahí salen el ancho y el
+    // número de líneas (1, 2 o 3). El alto es 28 px + 18 px por línea: nunca depende de medir texto envuelto.
+    if State.toast-visible: Rectangle {
+        private property <length> one-line: measure.preferred-width;
+        private property <int> lines: one-line <= 384px ? 1 : one-line <= 700px ? 2 : 3;
+        width: Math.min(root.width - 48px, lines == 1 ? Math.max(180px, one-line + 52px) : 420px);
+        height: 28px + lines * 18px;
+        x: root.width - self.width - 24px;
+        y: root.height - self.height - 24px;
+        background: Theme.surface2;
+        border-radius: Theme.radius-sm;
+        border-width: 1px;
+        border-color: Theme.border;
+        measure := Text {
+            visible: false;
+            text: State.toast-text;
+            font-size: 13px;
+        }
+        Rectangle {
+            x: 8px;
+            y: 8px;
+            width: 4px;
+            height: parent.height - 16px;
+            border-radius: 2px;
+            background: State.toast-kind == "ok" ? Theme.ok : State.toast-kind == "warn" ? Theme.warn : State.toast-kind == "error" ? Theme.danger : Theme.accent;
+        }
+        Text {
+            x: 22px;
+            y: 14px;
+            width: parent.width - 36px;
+            height: parent.lines * 18px;
+            text: State.toast-text;
+            color: Theme.text;
+            font-size: 13px;
+            wrap: word-wrap;
+            overflow: elide;
+        }
+    }
+}
+
+/// Ventana mínima para errores fatales (no se pudo iniciar NVML, etc.).
+export component FatalWindow inherits Window {
+    in property <string> message;
+    callback dismiss();
+    title: "GPU PY";
+    icon: @image-url("../assets/gpupy.png");
+    background: Theme.surface;
+    preferred-width: 480px;
+    default-font-family: Theme.font;
+    VerticalLayout {
+        padding: 26px;
+        spacing: 10px;
+        Text { text: "GPU PY"; font-size: 20px; font-weight: 700; color: Theme.text; }
+        Text { text: root.message; font-size: 13px; color: Theme.muted; wrap: word-wrap; }
+        HorizontalLayout {
+            alignment: end;
+            padding-top: 14px;
+            AppButton { text: "Cerrar"; kind: "primary"; min-width: 120px; clicked => { root.dismiss(); } }
+        }
+    }
+}
