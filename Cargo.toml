@@ -1,6 +1,6 @@
 [package]
 name = "gpu-py"
-version = "3.0.0"
+version = "3.0.1"
 edition = "2024"
 rust-version = "1.92"
 description = "Monitor, overclock, ventiladores y LED/RGB para GPUs NVIDIA (alternativa a PNY VelocityX)"
@@ -35,6 +35,7 @@ windows-sys = { version = "0.61", features = [
     "Win32_System_Console",
     "Win32_Storage_FileSystem",
     "Win32_Security",
+    "Win32_System_Threading",
 ] }
 
 [build-dependencies]

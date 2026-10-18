@@ -88,6 +88,26 @@ simulados que «pierden» una escritura (`tests/led_fix.rs`, que además reprodu
 `legacy_behavior = true`). Si en tu GPU sigue ocurriendo, ejecuta `gpu-py --led-info` y `gpu-py --i2c-scan` y
 revisa `led_report.txt`.
 
+## Si no se abre al iniciar Windows
+
+1. **Mira la bandeja.** Por defecto «Iniciar minimizado» y «Bandeja» están activados: al iniciar sesión GPU PY arranca
+   *sin ventana*, solo con su icono junto al reloj (suele quedar dentro de «^»). Clic en el icono para abrirla.
+2. Ejecuta `gpu-py --autostart status`. Muestra el ejecutable al que apunta la tarea y avisa si **ya no existe**
+   (se movió, se borró la descarga o se recompiló en otra carpeta). Si lo abres con la ventana, GPU PY detecta esa
+   situación y ofrece repararla. Reactivar el interruptor «Iniciar GPU PY al iniciar sesión» también la rehace.
+3. Revisa `%APPDATA%\GPU PY\startup.log`: registra cada arranque (argumentos, NVML, bandeja, perfil de inicio)
+   y **cualquier fallo o pánico**. Si sigue sin abrir, ese archivo y la salida de `--autostart status` dicen por qué.
+
+Correcciones de esta versión en el arranque con Windows:
+
+- La ventana se guardaba con una referencia débil; si no estaba visible (arranque oculto o enviada a la bandeja) se
+  destruía y el primer temporizador abortaba el programa **sin mensaje** (`panic = "abort"`, sin consola).
+- Si el icono de bandeja no podía crearse al iniciar sesión (el Explorador aún no tiene barra de tareas), la ventana
+  quedaba oculta y sin icono: ahora se muestra minimizada y se reintenta crear el icono cada 2 s.
+- NVML se reintenta hasta ~35 s al iniciar sesión (el driver puede no estar listo) y el LED se vuelve a detectar al
+  reintentar el perfil de inicio.
+- Una sola instancia: si la de la bandeja ya está en marcha, abrir otra avisa en vez de duplicar el control de GPU.
+
 ## Rendimiento
 
 Auditoría y cambios (la causa más probable de que redimensionar se entrecortara era ejecutar en debug sin optimizar):
@@ -119,7 +139,8 @@ cargo test
   `python3 scripts/gen_golden.py /ruta/a/GPU-PY`.
 - `tests/led_fix.rs` — el arreglo del LED y que **nunca** se escribe fuera de la lista blanca de registros.
 - `tests/core.rs` — perfiles (formato Python, campos ausentes, archivo corrupto con copia `.bak`), demo, gráficas.
-- Pruebas unitarias de autostart (XML y errores), instalación y el lector de telemetría en hilo (`src/reader.rs`).
+- `tests/startup.rs` — arranque con `--startup` sin bandeja: la ventana no queda invisible y los temporizadores siguen vivos con la ventana oculta.
+- Pruebas unitarias de autostart (XML, lectura de la tarea, tarea rota), registro, instalación y el lector de telemetría.
 
 `cargo run --example screenshot` renderiza todas las páginas a PNG sin necesidad de ventana
 (`GPUPY_SCREENSHOT=1 cargo run --example screenshot -- ./capturas`).
@@ -145,7 +166,7 @@ y después cambios pequeños (potencia/offset) comprobando la temperatura.
 - **Notificaciones** del globo de la bandeja: no hay (los avisos se muestran dentro de la ventana).
 - **Minimizar → bandeja** se detecta por sondeo cada 250 ms (Slint no emite un evento de minimizado).
 - Zonas de LED: casillas por zona (hasta 32).
-- Versión **3.0.0**.
+- Versión **3.0.1**.
 
 ## Licencia
 

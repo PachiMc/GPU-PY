@@ -5,7 +5,7 @@ use crate::backend::{DemoBackend, GpuBackend, NvmlBackend};
 use crate::core::{
     LedState, ProfileStore, apply_led_state, apply_profile_to_backend, i2c_scan_text, led_mut, make_led, oc_info_text,
 };
-use crate::{autostart, install};
+use crate::{applog, autostart, install, instance};
 use clap::{Parser, ValueEnum};
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -57,6 +57,7 @@ struct Cli {
 }
 
 fn fatal(msg: &str, gui: bool) -> ! {
+    applog::log(&format!("ERROR FATAL: {msg}"));
     if gui {
         show_fatal(msg);
     } else {
@@ -65,8 +66,38 @@ fn fatal(msg: &str, gui: bool) -> ! {
     std::process::exit(1)
 }
 
+/// Abre NVML. Al iniciar sesión el driver puede tardar en estar listo: con `--startup` se reintenta hasta
+/// ~35 s (aún no hay ventana, así que esperar no molesta) en vez de abortar al primer fallo.
+fn open_nvml(retry: bool) -> Result<NvmlBackend, crate::error::HwError> {
+    let attempts = if retry { 8 } else { 1 };
+    for n in 1..=attempts {
+        match NvmlBackend::new(0) {
+            Ok(b) => {
+                applog::log(&format!("NVML listo (intento {n})"));
+                return Ok(b);
+            }
+            Err(e) => {
+                applog::log(&format!("NVML no disponible (intento {n}/{attempts}): {e}"));
+                if n == attempts {
+                    return Err(e);
+                }
+                std::thread::sleep(std::time::Duration::from_secs(5));
+            }
+        }
+    }
+    unreachable!("attempts >= 1")
+}
+
 pub fn run() -> i32 {
+    applog::install_panic_hook();
     let a = Cli::parse();
+    applog::log(&format!(
+        "inicio v{} args={:?} exe={} admin={}",
+        crate::core::VERSION,
+        std::env::args().skip(1).collect::<Vec<_>>(),
+        std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_default(),
+        crate::backend::is_admin()
+    ));
 
     if a.list {
         let names = ProfileStore::load().names();
@@ -75,6 +106,10 @@ pub fn run() -> i32 {
     }
 
     if let Some(t) = a.autostart {
+        if matches!(t, Toggle::Status) {
+            println!("{}", autostart::status_report(&autostart::system_runner, autostart::is_supported()));
+            return 0;
+        }
         let r = match t {
             Toggle::On => autostart::enable(20, None).map(|_| "Inicio con Windows: ACTIVADO".to_string()),
             Toggle::Off => autostart::disable().map(|_| "Inicio con Windows: DESACTIVADO".to_string()),
@@ -137,10 +172,28 @@ pub fn run() -> i32 {
     }
 
     let cli = a.apply.is_some() || a.reset || a.oc_info;
+    // Una sola instancia con interfaz (la que arrancó con Windows puede estar solo en la bandeja).
+    let _instance = if cli || a.demo {
+        None
+    } else {
+        match instance::acquire() {
+            Some(g) => Some(g),
+            None => {
+                applog::log("ya hay otra instancia en ejecución; esta se cierra");
+                if !a.startup {
+                    show_fatal(
+                        "GPU PY ya está en ejecución.\n\nBusca su icono en la bandeja del sistema (junto al reloj; \
+                         puede estar dentro de «^») y haz clic para abrir la ventana.",
+                    );
+                }
+                return 0;
+            }
+        }
+    };
     let mut be: Box<dyn GpuBackend> = if a.demo {
         Box::new(DemoBackend::new())
     } else {
-        match NvmlBackend::new(0) {
+        match open_nvml(a.startup) {
             Ok(b) => Box::new(b),
             Err(e) => fatal(&e.0, !cli),
         }
@@ -177,7 +230,9 @@ pub fn run() -> i32 {
     }
 
     let app = App::new(be, led, led_err, a.startup);
-    if let Err(e) = app.run() {
+    let result = app.run();
+    applog::log(&format!("cierre: {}", result.as_ref().map_or_else(|e| format!("error {e}"), |_| "normal".into())));
+    if let Err(e) = result {
         eprintln!("ERROR: {e}");
         return 1;
     }

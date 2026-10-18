@@ -7,9 +7,10 @@ use crate::core::{
     apply_profile_to_backend, data_dir, default_profile, interpolate, led_mut,
 };
 use crate::nvapi::{LedController, color_hex, parse_color};
+use crate::applog;
 use crate::reader::TelemetryReader;
 use crate::{autostart, install};
-use slint::{CloseRequestResponse, ComponentHandle, Model, ModelRc, SharedString, Timer, TimerMode, VecModel, Weak};
+use slint::{CloseRequestResponse, ComponentHandle, Model, ModelRc, SharedString, Timer, TimerMode, VecModel};
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::rc::Rc;
@@ -17,7 +18,6 @@ use std::time::Duration;
 
 slint::include_modules!();
 
-#[cfg(windows)]
 use crate::tray::{TrayAction, TrayController};
 
 const HISTORY: usize = 120;
@@ -43,12 +43,14 @@ struct Inner {
     last_seq: u64,
     pending: Option<(Action, Option<Action>)>,
     zones: Rc<VecModel<bool>>,
-    #[cfg(windows)]
     tray: TrayController,
 }
 
 pub struct App {
-    ui: Weak<AppWindow>,
+    /// Referencia FUERTE: una ventana que no está visible (arranque oculto, bandeja) se destruye si nadie la
+    /// retiene, y el siguiente tic de un temporizador abortaría el programa. Los callbacks solo guardan
+    /// `Weak<App>`, así que no hay ciclo de referencias.
+    ui: AppWindow,
     st: RefCell<Inner>,
     toast_timer: Timer,
     poll_timer: Timer,
@@ -62,7 +64,17 @@ fn ss(s: impl Into<SharedString>) -> SharedString {
 
 impl App {
     pub fn ui(&self) -> AppWindow {
-        self.ui.upgrade().expect("la ventana ya no existe")
+        self.ui.clone_strong()
+    }
+
+    /// `true` si la ventana está oculta con su icono en la bandeja del sistema (no invisible).
+    pub fn in_tray(&self) -> bool {
+        self.st.borrow().in_tray
+    }
+
+    /// Número de tics del temporizador de telemetría (avanza cada segundo aunque la ventana esté oculta).
+    pub fn ticks(&self) -> u32 {
+        self.st.borrow().tick
     }
 
     fn state<'a>(ui: &'a AppWindow) -> State<'a> {
@@ -81,7 +93,7 @@ impl App {
         let ui = AppWindow::new().expect("no se pudo crear la ventana");
         let fan_supported = be.limits().num_fans > 0 || be.is_demo();
         let app = Rc::new(App {
-            ui: ui.as_weak(),
+            ui: ui.clone_strong(),
             st: RefCell::new(Inner {
                 be,
                 led,
@@ -98,7 +110,6 @@ impl App {
                 last_seq: 0,
                 pending: None,
                 zones: Rc::new(VecModel::default()),
-                #[cfg(windows)]
                 tray: TrayController::new(),
             }),
             toast_timer: Timer::default(),
@@ -139,6 +150,11 @@ impl App {
         }
 
         // Arranque normal o con Windows (--startup).
+        applog::log(&format!(
+            "ventana creada (startup={startup}, minimizado={}, bandeja={})",
+            app.st.borrow().settings.start_minimized,
+            app.st.borrow().settings.tray_enabled
+        ));
         let hidden_start = startup && app.st.borrow().settings.start_minimized;
         if hidden_start {
             if app.st.borrow().settings.tray_enabled {
@@ -149,6 +165,15 @@ impl App {
             }
         } else {
             ui.show().ok();
+        }
+        if !startup && autostart::is_supported() {
+            // Si el inicio con Windows apunta a un archivo que ya no existe, ofrecer repararlo.
+            let weak = Rc::downgrade(&app);
+            app.startup_timer.start(TimerMode::SingleShot, Duration::from_millis(2500), move || {
+                if let Some(a) = weak.upgrade() {
+                    a.check_broken_autostart();
+                }
+            });
         }
         if startup {
             let weak = Rc::downgrade(&app);
@@ -338,7 +363,7 @@ impl App {
         s.set_toast_text(ss(msg));
         s.set_toast_kind(ss(kind));
         s.set_toast_visible(true);
-        let weak = self.ui.clone();
+        let weak = self.ui.as_weak();
         let ms = match kind {
             "error" => 7000,
             "warn" => 5500,
@@ -891,6 +916,29 @@ impl App {
         }
     }
 
+    fn check_broken_autostart(&self) {
+        let Some(cmd) = autostart::task_command() else { return };
+        if !autostart::task_is_broken(&cmd) {
+            return;
+        }
+        applog::log(&format!("el inicio con Windows apunta a un archivo inexistente: {cmd}"));
+        self.ask(
+            "El inicio con Windows está roto",
+            &format!(
+                "La tarea de inicio apunta a:\n{cmd}\n\nese archivo ya no existe, por eso GPU PY no se abre al iniciar \
+                 Windows. ¿La repito para usar este ejecutable?"
+            ),
+            "Reparar",
+            "Ahora no",
+            false,
+            |app| match autostart::enable(20, None) {
+                Ok(()) => app.toast("Inicio con Windows reparado.", "ok"),
+                Err(e) => app.alert("Inicio con Windows", &e.0),
+            },
+            None,
+        );
+    }
+
     fn autostart_failed(&self, wanted: bool, msg: &str) {
         Self::state(&self.ui()).set_autostart_on(!wanted);
         self.alert("Inicio con Windows", msg);
@@ -947,18 +995,27 @@ impl App {
             i.settings.startup_profile.as_ref().and_then(|n| i.store.data.get(n).map(|p| (n.clone(), p.clone())))
         };
         let Some((name, prof)) = profile else {
+            applog::log("perfil de inicio: ninguno configurado");
             if manual {
                 self.toast("Elige primero un perfil de inicio.", "warn");
             }
             return;
         };
+        applog::log(&format!("perfil de inicio «{name}»: intento {}", attempt + 1));
         self.set_state(&prof);
         let errs = {
             let mut i = self.st.borrow_mut();
+            // Al iniciar sesión NVAPI puede no estar listo aún: si el LED no se detectó, se vuelve a intentar.
+            if i.led.is_none() && !i.be.is_demo() && attempt > 0 {
+                let (led, err) = crate::core::make_led(false);
+                i.led = led;
+                i.led_error = err;
+            }
             let Inner { be, led, .. } = &mut *i;
             apply_profile_to_backend(be.as_mut(), &prof, led_mut(led))
         };
         if !errs.is_empty() && attempt < 3 && !manual {
+            applog::log(&format!("perfil de inicio con errores, se reintenta en 8 s: {}", errs.join(" | ")));
             let weak = Rc::downgrade(self);
             self.startup_timer.start(TimerMode::SingleShot, Duration::from_secs(8), move || {
                 if let Some(a) = weak.upgrade() {
@@ -968,8 +1025,10 @@ impl App {
             return;
         }
         if errs.is_empty() {
+            applog::log(&format!("perfil de inicio «{name}» aplicado"));
             self.toast(&format!("Perfil «{name}» aplicado."), "ok");
         } else {
+            applog::log(&format!("perfil de inicio aplicado con errores: {}", errs.join(" | ")));
             self.toast(&format!("Perfil aplicado con errores: {}", errs[0]), "warn");
         }
     }
@@ -979,16 +1038,26 @@ impl App {
     // =========================================================================================
     fn hide_to_tray(&self, silent: bool) {
         let _ = silent;
-        #[cfg(windows)]
-        {
-            let tray_on = self.st.borrow().settings.tray_enabled;
-            if tray_on && self.st.borrow_mut().tray.start() {
-                self.set_in_tray(true);
-                self.ui().hide().ok();
-                return;
-            }
+        let tray_on = self.st.borrow().settings.tray_enabled;
+        if tray_on && self.st.borrow_mut().tray.start() {
+            self.set_in_tray(true);
+            self.ui().hide().ok();
+            applog::log("bandeja: ventana oculta, icono en la bandeja del sistema");
+            return;
         }
-        self.ui().window().set_minimized(true); // sin tray: minimizar clásico
+        // Sin bandeja (desactivada o aún no disponible): NUNCA dejar la aplicación invisible. Si la ventana no
+        // llegó a mostrarse (arranque con Windows) se muestra minimizada, con su botón en la barra de tareas.
+        // Mientras siga minimizada, `watch()` reintenta crear el icono cada 2 s y entonces la oculta.
+        let ui = self.ui();
+        if !ui.window().is_visible() {
+            ui.show().ok();
+            applog::log(if tray_on {
+                "bandeja: no disponible todavía; ventana minimizada en la barra de tareas (se reintentará)"
+            } else {
+                "ventana minimizada en la barra de tareas"
+            });
+        }
+        ui.window().set_minimized(true);
     }
 
     fn set_in_tray(&self, v: bool) {
@@ -1000,7 +1069,6 @@ impl App {
     }
 
     fn show_from_tray(&self) {
-        #[cfg(windows)]
         self.st.borrow_mut().tray.stop();
         self.set_in_tray(false);
         let ui = self.ui();
@@ -1010,21 +1078,18 @@ impl App {
 
     /// Cada 250 ms: eventos del tray y detección de "minimizar".
     fn watch(self: &Rc<Self>) {
-        #[cfg(windows)]
-        {
-            let action = self.st.borrow().tray.poll();
-            match action {
-                Some(TrayAction::Show) => self.show_from_tray(),
-                Some(TrayAction::ApplyProfile) => self.run_startup(0, true),
-                Some(TrayAction::Quit) => self.exit_app(),
-                None => {}
-            }
+        let action = self.st.borrow().tray.poll();
+        match action {
+            Some(TrayAction::Show) => self.show_from_tray(),
+            Some(TrayAction::ApplyProfile) => self.run_startup(0, true),
+            Some(TrayAction::Quit) => self.exit_app(),
+            None => {}
         }
         let (tray_on, in_tray) = {
             let i = self.st.borrow();
             (i.settings.tray_enabled, i.in_tray)
         };
-        if tray_on && !in_tray && self.ui.upgrade().is_some_and(|u| u.window().is_minimized()) {
+        if tray_on && !in_tray && self.ui.window().is_minimized() {
             self.hide_to_tray(false);
         }
     }
@@ -1032,11 +1097,10 @@ impl App {
     pub fn exit_app(&self) {
         {
             let mut i = self.st.borrow_mut();
-            let manual = self.ui.upgrade().is_some_and(|u| u.global::<State>().get_fan_mode() != 0);
+            let manual = self.ui.global::<State>().get_fan_mode() != 0;
             if manual {
                 let _ = i.be.fan_auto(); // nunca dejes el ventilador en manual
             }
-            #[cfg(windows)]
             i.tray.stop();
         }
         self.st.borrow_mut().reader = None; // detiene el hilo lector

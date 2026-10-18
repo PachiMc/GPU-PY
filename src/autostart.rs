@@ -114,12 +114,59 @@ fn denied(msg: &str) -> bool {
     m.contains("denied") || m.contains("denegado")
 }
 
+/// Ejecutable que lanza la tarea (campo `<Command>` del XML de la tarea).
+pub fn parse_task_command(xml: &str) -> Option<String> {
+    let start = xml.find("<Command>")? + "<Command>".len();
+    let end = xml[start..].find("</Command>")? + start;
+    let raw = xml[start..end].trim();
+    Some(raw.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&"))
+}
+
+pub fn task_command() -> Option<String> {
+    task_command_with(&system_runner)
+}
+
+pub fn task_command_with(run: Runner) -> Option<String> {
+    let r = run(&cmd(&["schtasks", "/Query", "/TN", TASK_NAME, "/XML"])).ok()?;
+    (r.code == 0).then(|| parse_task_command(&r.stdout)).flatten()
+}
+
+/// ¿La tarea apunta a un archivo que ya no existe? (causa típica de «no abre con Windows»: se movió, se borró
+/// la descarga o se recompiló en otra carpeta). Solo se afirma con rutas ASCII: la consola de Windows devuelve
+/// el XML en la página de códigos OEM y una ruta con acentos podría leerse mal.
+pub fn task_is_broken(command: &str) -> bool {
+    command.is_ascii() && !Path::new(command).exists()
+}
+
+/// Informe para `gpu-py --autostart status`.
+pub fn status_report(run: Runner, supported: bool) -> String {
+    if !supported {
+        return "Inicio con Windows: no disponible en este sistema.".into();
+    }
+    let enabled = is_enabled_with(run);
+    let mut out = vec![format!("Inicio con Windows: {}", if enabled { "ACTIVADO" } else { "desactivado" })];
+    if enabled {
+        match task_command_with(run) {
+            Some(c) => {
+                let state = if task_is_broken(&c) { "NO EXISTE ← la tarea apunta a un archivo que ya no está" } else { "existe" };
+                out.push(format!("La tarea ejecuta: {c} ({state})"));
+            }
+            None => out.push("No se pudo leer el ejecutable de la tarea.".into()),
+        }
+        if let Ok(r) = run(&cmd(&["schtasks", "/Query", "/TN", TASK_NAME, "/V", "/FO", "LIST"])) {
+            out.push(format!("\nDetalle de Windows:\n{}", r.stdout.trim()));
+        }
+    }
+    out.push(format!("Registro de arranque: {}", crate::applog::log_path().display()));
+    out.join("\n")
+}
+
 pub fn is_enabled() -> bool {
-    is_enabled_with(&system_runner)
+    is_supported() && is_enabled_with(&system_runner)
 }
 
 pub fn is_enabled_with(run: Runner) -> bool {
-    is_supported() && run(&cmd(&["schtasks", "/Query", "/TN", TASK_NAME])).is_ok_and(|r| r.code == 0)
+    run(&cmd(&["schtasks", "/Query", "/TN", TASK_NAME])).is_ok_and(|r| r.code == 0)
 }
 
 pub fn enable(delay_s: u32, exe_override: Option<&Path>) -> HwResult<()> {
@@ -207,6 +254,33 @@ mod tests {
         assert_eq!(&c[..4], ["schtasks", "/Create", "/TN", TASK_NAME]);
         assert_eq!(c[4], "/XML");
         assert_eq!(c.last().unwrap(), "/F");
+    }
+
+    #[test]
+    fn reads_command_back_from_task_xml() {
+        let x = build_task_xml(r"C:\A&B\GPU-PY.exe", "--startup", r"C:\A&B", "PC\\Ana", 20);
+        assert_eq!(parse_task_command(&x).as_deref(), Some(r"C:\A&B\GPU-PY.exe"));
+        assert_eq!(parse_task_command("<Task></Task>"), None);
+    }
+
+    #[test]
+    fn detects_a_task_pointing_to_a_missing_file() {
+        let here = std::env::current_exe().unwrap();
+        assert!(!task_is_broken(&here.display().to_string()));
+        assert!(task_is_broken("/no/existe/GPU-PY.exe"));
+        assert!(!task_is_broken("/carpeta/ñandú/GPU-PY.exe"), "con acentos no se afirma que esté roto");
+    }
+
+    #[test]
+    fn status_report_explains_a_broken_task() {
+        let xml = build_task_xml("/no/existe/GPU-PY.exe", "--startup", "/no/existe", "PC\\Ana", 20);
+        let run = move |c: &[String]| {
+            Ok(CmdResult { code: 0, stdout: if c.contains(&"/XML".to_string()) { xml.clone() } else { "Estado: Listo".into() }, ..Default::default() })
+        };
+        let rep = status_report(&run, true);
+        assert!(rep.contains("ACTIVADO"), "{rep}");
+        assert!(rep.contains("/no/existe/GPU-PY.exe") && rep.contains("NO EXISTE"), "{rep}");
+        assert!(rep.contains("Registro de arranque"), "{rep}");
     }
 
     #[test]
