@@ -108,6 +108,23 @@ Correcciones de esta versión en el arranque con Windows:
   reintentar el perfil de inicio.
 - Una sola instancia: si la de la bandeja ya está en marcha, abrir otra avisa en vez de duplicar el control de GPU.
 
+## Tras suspender o hibernar
+
+Al reanudar el PC el driver restablece el overclock, el límite de potencia, los ventiladores y el LED, y antes había
+que volver a aplicar el perfil a mano. Ahora GPU PY recuerda **lo último que aplicaste** (overclock, ventilador, LED,
+o el perfil de inicio) y lo reaplica solo:
+
+- La reanudación se detecta por el salto del reloj entre dos tics del programa (los temporizadores se detienen mientras
+  el PC duerme): sirve para suspender, hibernar y «Modern Standby», sin ventanas ocultas ni mensajes de Windows.
+- El driver y el controlador del LED tardan unos segundos en responder al despertar, así que se reintenta a los 4, 12 y
+  30 s y se **comprueba** que los offsets quedaron aplicados. Si algo falla, se ve en `startup.log` y en un aviso.
+- En modo curva, los ventiladores se vuelven a fijar en el siguiente tic.
+- Se desactiva en *Ajustes → Reaplicar tras suspender o hibernar*.
+- Si usas «Restaurar original» (LED) o «Valores de fábrica», eso deja de reaplicarse.
+
+No cubre un reinicio del driver *sin* dormir el PC (p. ej. un fallo gráfico): un vigilante periódico de los valores
+sería el siguiente paso, pero puede pelearse con otras herramientas (Afterburner), por eso no lo activé.
+
 ## Rendimiento
 
 Auditoría y cambios (la causa más probable de que redimensionar se entrecortara era ejecutar en debug sin optimizar):
@@ -139,6 +156,7 @@ cargo test
   `python3 scripts/gen_golden.py /ruta/a/GPU-PY`.
 - `tests/led_fix.rs` — el arreglo del LED y que **nunca** se escribe fuera de la lista blanca de registros.
 - `tests/core.rs` — perfiles (formato Python, campos ausentes, archivo corrupto con copia `.bak`), demo, gráficas.
+- `tests/resume.rs` — tras «reiniciar» el driver se restauran overclock, ventilador y LED; reintentos si el driver no está listo; respeta el ajuste desactivado.
 - `tests/startup.rs` — arranque con `--startup` sin bandeja: la ventana no queda invisible y los temporizadores siguen vivos con la ventana oculta.
 - Pruebas unitarias de autostart (XML, lectura de la tarea, tarea rota), registro, instalación y el lector de telemetría.
 
@@ -166,7 +184,7 @@ y después cambios pequeños (potencia/offset) comprobando la temperatura.
 - **Notificaciones** del globo de la bandeja: no hay (los avisos se muestran dentro de la ventana).
 - **Minimizar → bandeja** se detecta por sondeo cada 250 ms (Slint no emite un evento de minimizado).
 - Zonas de LED: casillas por zona (hasta 32).
-- Versión **3.0.1**.
+- Versión **3.1.0**.
 
 ## Licencia
 

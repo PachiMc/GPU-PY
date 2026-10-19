@@ -8,6 +8,7 @@ use crate::core::{
 };
 use crate::nvapi::{LedController, color_hex, parse_color};
 use crate::applog;
+use crate::power::{RESUME_GAP_SECS, ResumeDetector, now_secs};
 use crate::reader::TelemetryReader;
 use crate::{autostart, install};
 use slint::{CloseRequestResponse, ComponentHandle, Model, ModelRc, SharedString, Timer, TimerMode, VecModel};
@@ -27,6 +28,34 @@ const LED_LABELS: [&str; 6] = ["No cambiar", "Color fijo", "Respiración", "Apag
 
 type Action = Box<dyn FnOnce(&Rc<App>)>;
 
+/// Esperas entre intentos de reaplicar tras reanudar (acumuladas: a los 4, 12 y 30 s). El driver y el
+/// controlador del LED tardan unos segundos en estar listos después de despertar.
+const RESUME_DELAYS: [Duration; 3] = [Duration::from_secs(4), Duration::from_secs(8), Duration::from_secs(18)];
+
+#[derive(Clone)]
+struct OcApplied {
+    power_w: f64,
+    core: i32,
+    mem: i32,
+    lock_on: bool,
+    lock_mhz: i32,
+}
+
+/// Lo último que el usuario aplicó (o que aplicó el perfil de inicio): es lo que se reaplica al reanudar.
+#[derive(Clone, Default)]
+struct Applied {
+    oc: Option<OcApplied>,
+    /// (modo, velocidad manual): "auto" | "manual" | "curve"
+    fan: Option<(String, i32)>,
+    led: Option<LedState>,
+}
+
+impl Applied {
+    fn is_empty(&self) -> bool {
+        self.oc.is_none() && self.fan.is_none() && self.led.is_none()
+    }
+}
+
 struct Inner {
     be: Box<dyn GpuBackend>,
     led: Option<Box<dyn LedController>>,
@@ -39,6 +68,8 @@ struct Inner {
     hist: [VecDeque<f64>; 3], // temperatura, uso, potencia
     in_tray: bool,
     tick: u32,
+    applied: Applied,
+    resume: ResumeDetector,
     reader: Option<TelemetryReader>,
     last_seq: u64,
     pending: Option<(Action, Option<Action>)>,
@@ -56,6 +87,7 @@ pub struct App {
     poll_timer: Timer,
     watch_timer: Timer,
     startup_timer: Timer,
+    resume_timer: Timer,
 }
 
 fn ss(s: impl Into<SharedString>) -> SharedString {
@@ -106,6 +138,8 @@ impl App {
                 hist: Default::default(),
                 in_tray: false,
                 tick: 0,
+                applied: Applied::default(),
+                resume: ResumeDetector::new(RESUME_GAP_SECS),
                 reader: None,
                 last_seq: 0,
                 pending: None,
@@ -116,6 +150,7 @@ impl App {
             poll_timer: Timer::default(),
             watch_timer: Timer::default(),
             startup_timer: Timer::default(),
+            resume_timer: Timer::default(),
         });
 
         // Lecturas del driver en otro hilo (si el backend lo permite): la interfaz nunca espera a NVML.
@@ -264,6 +299,7 @@ impl App {
         st.set_autostart_on(autostart::is_supported() && autostart::is_enabled());
         st.set_start_minimized(s.start_minimized);
         st.set_tray_enabled(s.tray_enabled);
+        st.set_reapply_on_resume(s.reapply_on_resume);
         st.set_startup_choice(ss(s.startup_profile.clone().unwrap_or_else(|| "Ninguno".into())));
         st.set_perm_text(ss(if is_admin() || inner.be.is_demo() { "Administrador" } else { "Usuario estándar" }));
         st.set_data_dir(ss(data_dir().display().to_string()));
@@ -580,6 +616,13 @@ impl App {
         let mut p = self.get_state();
         p.fan_mode = "keep".into(); // esta página no toca ventiladores ni LED
         p.led = None;
+        self.st.borrow_mut().applied.oc = Some(OcApplied {
+            power_w: p.power_w,
+            core: p.core_off,
+            mem: p.mem_off,
+            lock_on: p.lock_on,
+            lock_mhz: p.lock_mhz,
+        });
         let errs = {
             let mut i = self.st.borrow_mut();
             apply_profile_to_backend(i.be.as_mut(), &p, None)
@@ -600,6 +643,7 @@ impl App {
         let ui = self.ui();
         let s = Self::state(&ui);
         let manual = s.get_fan_manual();
+        self.st.borrow_mut().applied.fan = Some((FAN_MODES[s.get_fan_mode().clamp(0, 2) as usize].to_string(), manual));
         let result = {
             let mut i = self.st.borrow_mut();
             match s.get_fan_mode() {
@@ -616,6 +660,7 @@ impl App {
     }
 
     fn fan_failed(&self, msg: &str) {
+        self.st.borrow_mut().applied.fan = None; // no reaplicar algo que el driver rechaza
         let ui = self.ui();
         let s = Self::state(&ui);
         s.set_fan_mode(0);
@@ -629,6 +674,8 @@ impl App {
             let mut i = self.st.borrow_mut();
             let errs = i.be.reset_all();
             i.last_fan = None;
+            i.applied.oc = None;
+            i.applied.fan = None;
             (errs, default_profile(i.be.as_ref()))
         };
         self.set_state(&profile);
@@ -637,6 +684,127 @@ impl App {
         } else {
             self.toast("Restablecido (algunos ajustes no son compatibles).", "warn");
         }
+    }
+
+    // =========================================================================================
+    // Reanudar tras suspender / hibernar
+    // =========================================================================================
+    /// Anota lo que aplica un perfil (perfil de inicio) para poder reaplicarlo.
+    fn remember_profile(&self, p: &Profile) {
+        let mut i = self.st.borrow_mut();
+        i.applied.oc = Some(OcApplied {
+            power_w: p.power_w,
+            core: p.core_off,
+            mem: p.mem_off,
+            lock_on: p.lock_on,
+            lock_mhz: p.lock_mhz,
+        });
+        i.applied.fan = matches!(p.fan_mode.as_str(), "auto" | "manual" | "curve").then(|| (p.fan_mode.clone(), p.fan_manual));
+        i.applied.led = p.led.clone().filter(|l| !matches!(l.mode.as_str(), "keep" | "default"));
+    }
+
+    /// El PC acaba de despertar: el driver restableció overclock, ventiladores y LED.
+    pub fn handle_resume(self: &Rc<Self>, gap_secs: f64) {
+        self.handle_resume_with(gap_secs, RESUME_DELAYS.to_vec());
+    }
+
+    pub fn handle_resume_with(self: &Rc<Self>, gap_secs: f64, delays: Vec<Duration>) {
+        let (enabled, nothing) = {
+            let mut i = self.st.borrow_mut();
+            i.last_fan = None; // la curva de ventiladores volverá a fijar la velocidad en el siguiente tic
+            (i.settings.reapply_on_resume, i.applied.is_empty())
+        };
+        applog::log(&format!("reanudación detectada (~{gap_secs:.0} s dormido)"));
+        if !enabled {
+            applog::log("reaplicar tras reanudar: desactivado en Ajustes");
+        } else if nothing {
+            applog::log("reaplicar tras reanudar: no hay nada aplicado que restaurar");
+        } else {
+            self.schedule_reapply(0, delays);
+        }
+    }
+
+    fn schedule_reapply(self: &Rc<Self>, attempt: usize, delays: Vec<Duration>) {
+        let Some(wait) = delays.get(attempt).copied() else {
+            applog::log("reaplicar tras reanudar: se agotaron los intentos");
+            self.toast("No se pudieron reaplicar los ajustes tras reanudar. Aplícalos de nuevo.", "warn");
+            return;
+        };
+        let weak = Rc::downgrade(self);
+        self.resume_timer.start(TimerMode::SingleShot, wait, move || {
+            let Some(app) = weak.upgrade() else { return };
+            let errs = app.reapply_now();
+            if errs.is_empty() {
+                applog::log(&format!("reaplicar tras reanudar: correcto (intento {})", attempt + 1));
+                app.toast("Ajustes reaplicados tras reanudar.", "ok");
+            } else {
+                applog::log(&format!("reaplicar tras reanudar: intento {} con errores: {}", attempt + 1, errs.join(" | ")));
+                app.schedule_reapply(attempt + 1, delays.clone());
+            }
+        });
+    }
+
+    /// Vuelve a aplicar lo último aplicado y comprueba los offsets. Devuelve los errores (vacío = todo bien).
+    fn reapply_now(&self) -> Vec<String> {
+        let mut i = self.st.borrow_mut();
+        let applied = i.applied.clone();
+        let mut errs = Vec::new();
+
+        if let Some(oc) = &applied.oc {
+            let p = Profile {
+                power_w: oc.power_w,
+                core_off: oc.core,
+                mem_off: oc.mem,
+                lock_on: oc.lock_on,
+                lock_mhz: oc.lock_mhz,
+                fan_mode: "keep".into(),
+                led: None,
+                ..Profile::default()
+            };
+            errs.extend(apply_profile_to_backend(i.be.as_mut(), &p, None));
+            // Comprobación: el driver puede aceptar la orden y no quedarse con el valor.
+            let l = i.be.limits().clone();
+            if l.oc_supported {
+                let (want_core, want_mem) =
+                    (l.core_off_min.max(l.core_off_max.min(oc.core)), l.mem_off_min.max(l.mem_off_max.min(oc.mem)));
+                let (got_core, got_mem) = (i.be.core_offset(), i.be.mem_offset());
+                if got_core != want_core {
+                    errs.push(format!("offset del núcleo: {got_core} MHz en lugar de {want_core} MHz"));
+                }
+                if got_mem != want_mem {
+                    errs.push(format!("offset de la memoria: {got_mem} MHz en lugar de {want_mem} MHz"));
+                }
+            }
+        }
+
+        if let Some((mode, manual)) = &applied.fan {
+            let r = match mode.as_str() {
+                "manual" => i.be.set_fan(*manual),
+                "auto" => i.be.fan_auto(),
+                _ => Ok(()), // curva: la fija el bucle de telemetría
+            };
+            if let Err(e) = r {
+                errs.push(format!("ventilador: {e}"));
+            }
+        }
+
+        if let Some(st) = &applied.led {
+            // Al despertar NVAPI/I2C puede tardar en responder: si no había controlador, se vuelve a buscar.
+            if i.led.is_none() && !i.be.is_demo() {
+                let (led, err) = crate::core::make_led(false);
+                i.led = led;
+                i.led_error = err;
+            }
+            match i.led.as_deref_mut() {
+                Some(led) => {
+                    if let Err(e) = apply_led_state(led, st) {
+                        errs.push(format!("LED: {e}"));
+                    }
+                }
+                None => errs.push("LED: controlador no disponible".into()),
+            }
+        }
+        errs
     }
 
     // ---- curva ----
@@ -711,6 +879,9 @@ impl App {
             return self.toast("Selecciona al menos una zona.", "warn");
         }
         let r = apply_led_state(led, &st);
+        if r.is_ok() {
+            i.applied.led = Some(st);
+        }
         drop(i);
         match r {
             Ok(()) => self.toast("LED aplicado.", "ok"),
@@ -725,6 +896,9 @@ impl App {
             return self.apply_led();
         };
         let r = led.restore_default();
+        if r.is_ok() {
+            i.applied.led = None; // el usuario pidió el color original: no reaplicar nada
+        }
         drop(i);
         match r {
             Ok(()) => self.toast("LED restaurado a los valores originales.", "ok"),
@@ -859,6 +1033,7 @@ impl App {
             let mut i = self.st.borrow_mut();
             i.settings.start_minimized = s.get_start_minimized();
             i.settings.tray_enabled = s.get_tray_enabled();
+            i.settings.reapply_on_resume = s.get_reapply_on_resume();
             i.settings.startup_profile = (choice != "Ninguno").then_some(choice);
             if let Err(e) = i.settings.save() {
                 drop(i);
@@ -1003,6 +1178,7 @@ impl App {
         };
         applog::log(&format!("perfil de inicio «{name}»: intento {}", attempt + 1));
         self.set_state(&prof);
+        self.remember_profile(&prof);
         let errs = {
             let mut i = self.st.borrow_mut();
             // Al iniciar sesión NVAPI puede no estar listo aún: si el LED no se detectó, se vuelve a intentar.
@@ -1078,6 +1254,10 @@ impl App {
 
     /// Cada 250 ms: eventos del tray y detección de "minimizar".
     fn watch(self: &Rc<Self>) {
+        let gap = self.st.borrow_mut().resume.tick(now_secs());
+        if let Some(gap) = gap {
+            self.handle_resume(gap);
+        }
         let action = self.st.borrow().tray.poll();
         match action {
             Some(TrayAction::Show) => self.show_from_tray(),

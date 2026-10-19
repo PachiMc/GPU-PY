@@ -47,11 +47,13 @@ pub struct Settings {
     pub start_minimized: bool,
     pub startup_profile: Option<String>,
     pub tray_enabled: bool,
+    /// Tras suspender/hibernar el driver restablece OC, ventiladores y LED: volver a aplicar lo último aplicado.
+    pub reapply_on_resume: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { start_minimized: true, startup_profile: None, tray_enabled: true }
+        Self { start_minimized: true, startup_profile: None, tray_enabled: true, reapply_on_resume: true }
     }
 }
 

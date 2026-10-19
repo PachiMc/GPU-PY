@@ -9,5 +9,6 @@ pub mod error;
 pub mod install;
 pub mod instance;
 pub mod nvapi;
+pub mod power;
 pub mod reader;
 pub mod tray;

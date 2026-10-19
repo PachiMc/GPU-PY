@@ -468,6 +468,12 @@ export component SettingsPage inherits ScrollView {
                 checked <=> State.tray-enabled;
                 toggled(_) => { State.settings-changed(); }
             }
+            SwitchRow {
+                title: "Reaplicar tras suspender o hibernar";
+                hint: "Al reanudar el PC el driver restablece overclock, ventiladores y LED. GPU PY vuelve a aplicar lo último que aplicaste.";
+                checked <=> State.reapply-on-resume;
+                toggled(_) => { State.settings-changed(); }
+            }
             HorizontalLayout {
                 spacing: 12px;
                 VerticalLayout {

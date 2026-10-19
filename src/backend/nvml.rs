@@ -191,7 +191,16 @@ impl GpuBackend for NvmlBackend {
                 if slot.is_none() {
                     *slot = Nvml::init().ok();
                 }
-                slot.as_ref().map(|n| read_telemetry(n, index)).unwrap_or_default()
+                match slot.as_ref() {
+                    Some(n) if n.device_by_index(index).is_ok() => read_telemetry(n, index),
+                    Some(_) => {
+                        // Tras suspender/reanudar o un reinicio del driver el manejador puede quedar inválido:
+                        // se descarta y se vuelve a inicializar NVML en la siguiente lectura.
+                        *slot = None;
+                        Telemetry::default()
+                    }
+                    None => Telemetry::default(),
+                }
             })
         }))
     }
